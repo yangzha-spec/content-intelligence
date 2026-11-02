@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 
@@ -66,13 +66,17 @@ before(async () => {
     $$;
     grant usage on schema public, auth to anon, authenticated;
     grant execute on function auth.uid() to anon, authenticated;
+    create function public.rls_auto_enable() returns event_trigger
+      language plpgsql security definer set search_path = '' as $$ begin end; $$;
   `);
   for (const user of Object.values(users)) {
     await db.query('insert into auth.users values ($1)', [user]);
   }
-  const migration = await readFile(new URL(
-    '../supabase/migrations/20261102000100_core_schema.sql', import.meta.url), 'utf8');
-  await db.exec(migration);
+  const migrationsDir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = (await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort();
+  for (const name of migrations) {
+    await db.exec(await readFile(new URL(name, migrationsDir), 'utf8'));
+  }
   fixture.workspaceA = (await one(`insert into public.workspaces(name, owner_id)
     values ('A', $1) returning id`, [users.alice])).id;
   fixture.workspaceB = (await one(`insert into public.workspaces(name, owner_id)
@@ -198,6 +202,14 @@ test('anonymous requests have no business-table access', async () => {
       await expectError(`select * from public.${table}`, [], '42501');
     }
   }, 'anon');
+});
+
+test('the automatic-RLS event helper is not executable by API users', async () => {
+  const access = await one(`select
+    has_function_privilege('anon', 'public.rls_auto_enable()', 'EXECUTE') as anon_access,
+    has_function_privilege('authenticated', 'public.rls_auto_enable()', 'EXECUTE') as user_access`);
+  assert.equal(access.anon_access, false);
+  assert.equal(access.user_access, false);
 });
 
 test('an inaccessible project rejects inserts even if its UUID is known', async () => {

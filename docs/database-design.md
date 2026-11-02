@@ -1,6 +1,6 @@
 # 数据库设计与决策 V0.1
 
-日期：2026-11-02。状态：P0 建表文件已准备，尚未在云端执行。
+日期：2026-11-02。状态：P0 的 8 张表已在云端创建，结构与角色权限检查通过。
 
 原始 V1.0 文件是设计参考；本文记录实现方案、明确化的规则和阶段边界。
 外部数据集字段、许可证、平台指标定义和模型效果均未因此获得核验。
@@ -82,7 +82,8 @@ erDiagram
 
 创建工作空间时由触发器写入 owner 成员。成员表的权限检查通过 `private` 模式中的函数进行，避免递归 RLS。
 `private` 不能加入 Supabase 的 Exposed schemas。辅助函数固定空 `search_path`，仅向 authenticated 授予必要执行权限。
-业务表全部启用 RLS；高权限后端密钥会绕过这些策略，后续后端接口仍必须验证用户与项目归属。
+业务表全部启用 RLS。当前客户端通过用户会话访问，未额外授予 `service_role` 业务表权限。
+后续如需要高权限后端作业，须另行审查并明确授权；后端接口仍必须验证用户与项目归属。
 
 ## 删除与可追溯性
 
@@ -94,7 +95,8 @@ erDiagram
 
 本地验证使用 PGlite 的 PostgreSQL 引擎，模拟 Supabase Auth，执行实际迁移文件。
 覆盖工作空间隔离、非 owner 成员读取、角色写权限、跨项目外键、NULL、快照与评论去重及级联删除。
-云端 Auth、Storage、Data API 和实际文件导入仍须在 Supabase 项目创建后验证。
+云端已用事务内合成用户验证实际 PostgreSQL 角色、`auth.uid()` 和 RLS，测试数据全部回滚。
+这不是完整的用户登录测试。Storage、真实登录后的 Data API 和文件导入将在应用阶段联调。
 
 - [Supabase：Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [Supabase：数据库迁移](https://supabase.com/docs/guides/local-development/database-migrations)
