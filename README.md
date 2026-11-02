@@ -4,8 +4,14 @@
 
 ## 当前进度
 
-项目处于数据库与仓库初始化阶段，尚无可启动的网页应用。
+第一部分「登录与项目管理」已实现，真实账号验收待用户完成邮箱确认。
+当前应用采用 Next.js + TypeScript 静态导出，浏览器通过 Supabase 用户会话访问数据库，由 RLS 限制项目权限。
 Supabase 项目已连接，P0 的 8 张业务表与权限策略已在云端创建并验证。
+
+- 已实现注册、密码登录、退出与密码重置入口。
+- 已实现个人工作空间初始化、空间切换、项目创建、列表搜索排序与详情。
+- 支持明确标注、不会写库的只读界面预览。
+- 数据导入、指标分析和 AI 洞察尚未开放。
 
 - 已保存原始 V1.0 数据规范，作为需求参考。
 - 已在云端创建 P0 的 8 张业务表及访问权限策略。
@@ -21,20 +27,33 @@ Supabase 项目已连接，P0 的 8 张业务表与权限策略已在云端创�
 - [数据库设计与决策](docs/database-design.md)
 - [Supabase 创建与接入](docs/supabase-setup.md)
 - [开发阶段与验收](docs/implementation-plan.md)
+- [第一部分验收说明](docs/part-1-acceptance.md)
 - [变更记录](CHANGELOG.md)
 
-## 本地验证
+## 本地启动与验证
 
-需要 Node.js 22 或更高版本。
+需要 Node.js 22.18 或更高版本，当前开发环境为 Node.js 24。
 
 ```sh
 npm ci
+npm run dev
+```
+
+先将 `.env.example` 复制为 `.env.local` 并填写项目 URL 与 publishable key。
+打开终端显示的地址（默认 `http://127.0.0.1:3000`），可以登录、注册或点击「浏览界面预览」。
+注册需要完成邮箱确认；测试前按 [第一部分验收说明](docs/part-1-acceptance.md) 设置 Supabase 邮件回跳地址。
+
+```sh
+npm run typecheck
 npm test
+npm run build
+npm run check:connection
 ```
 
 测试会在内存中创建 PostgreSQL 数据库，模拟 Supabase Auth 的用户、角色和 `auth.uid()`，
 执行真实迁移 SQL，并验证外键、去重、NULL、工作空间隔离与角色权限。
-这不能代替云端 Supabase Auth、Storage 和 API 的联调验收。
+这不能代替真实用户登录与 Storage 上传的联调验收。`npm run build` 输出静态页面到 `out/`。
+发布时 Supabase 的两个公开配置在构建阶段内联到客户端；高权限密钥不参与构建或客户端请求。
 
 ## 数据库文件
 
@@ -56,5 +75,5 @@ supabase/migrations/20261102104754_harden_rls_and_fk_indexes.sql
 
 ## 下一阶段
 
-数据库准备完成；下一阶段实现：
-创建项目 → 上传 CSV/XLSX → 字段映射与校验 → 导入预览 → 确认入库 → 基础统计。
+先完成第一部分的真实账号验收，再实现第二部分：
+上传 CSV/XLSX → 字段映射与校验 → 导入预览。正式入库作为第三部分单独验收。
