@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './import.css';
 
 export const metadata: Metadata = {
   title: 'Content Intelligence · 内容洞察工作台',

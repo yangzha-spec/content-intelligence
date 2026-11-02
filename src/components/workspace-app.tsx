@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import dynamic from 'next/dynamic';
 import type { Database } from '@/types/database';
 import { getSupabase } from '@/lib/supabase';
 import { projectInput, readableError } from '@/lib/project-input';
 import { Icon, Logo } from './icon';
+
+const ImportPreview = dynamic(() => import('./import-preview'), { ssr: false, loading: () => <div className="empty-state"><span className="spinner"/><p>正在打开导入预览…</p></div> });
 
 type Project = Database['public']['Tables']['projects']['Row'];
 type Workspace = Database['public']['Tables']['workspaces']['Row'];
@@ -118,11 +121,12 @@ export default function WorkspaceApp() {
   const [loading, setLoading] = useState(true); const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState(''); const [authError, setAuthError] = useState(''); const [toast, setToast] = useState('');
   const [search, setSearch] = useState(''); const [sort, setSort] = useState('recent'); const [selectedId, setSelectedId] = useState('');
+  const [importing, setImporting] = useState(false);
   const [creating, setCreating] = useState(false); const [busy, setBusy] = useState(false); const [sidebarOpen, setSidebarOpen] = useState(false);
   const [refresh, setRefresh] = useState(0); const userId = session?.user.id;
   useEffect(() => {
     setPreview(new URLSearchParams(window.location.search).get('preview') === '1');
-    const readLocation = () => setSelectedId(new URLSearchParams(window.location.search).get('project') || '');
+    const readLocation = () => { const query = new URLSearchParams(window.location.search); setSelectedId(query.get('project') || ''); setImporting(query.get('view') === 'import'); };
     readLocation(); window.addEventListener('popstate', readLocation);
     let alive = true;
     try {
@@ -171,8 +175,9 @@ export default function WorkspaceApp() {
     .toSorted((a, b) => sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : b.created_at.localeCompare(a.created_at));
   const navigate = useCallback((id = '', isPreview = preview) => {
     const query = new URLSearchParams(); if (isPreview) query.set('preview', '1'); if (id) query.set('project', id);
-    window.history.pushState(null, '', `/${query.size ? `?${query}` : ''}`); setSelectedId(id); setSidebarOpen(false);
+    window.history.pushState(null, '', `/${query.size ? `?${query}` : ''}`); setSelectedId(id); setImporting(false); setSidebarOpen(false);
   }, [preview]);
+  function openImport() { const query = new URLSearchParams(window.location.search); query.set('view', 'import'); window.history.pushState(null, '', `/?${query}`); setImporting(true); }
   function leavePreview() { setPreview(false); navigate('', false); }
   async function createWorkspace() {
     if (busy || error) return; setBusy(true); setError('');
@@ -194,7 +199,7 @@ export default function WorkspaceApp() {
     <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}><Logo/>
       <div className="workspace-selector"><span className="workspace-avatar">{(activeWorkspace?.name || '我的空间').slice(0, 1)}</span><div><span className="small-label">当前工作空间</span><select aria-label="切换工作空间" value={preview ? sampleWorkspace.id : workspaceId} onChange={e => { setWorkspaceId(e.target.value); navigate(''); setSearch(''); }} disabled={preview || workspaces.length === 0}>{preview ? <option value={sampleWorkspace.id}>我的内容工作空间</option> : workspaces.length ? workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>) : <option value="">尚未创建工作空间</option>}</select></div></div>
       <div className="nav-heading">工作台</div><nav aria-label="主导航"><button className="nav-link active" onClick={() => navigate('')}><Icon name="grid"/>我的项目<span className="nav-count">{allProjects.length}</span></button><div className="nav-divider"/><div className="nav-heading">项目分析</div>{[['chart', '内容表现'], ['bubble', '评论洞察'], ['spark', 'AI 运营建议']].map(([icon, label]) => <div key={icon} className="nav-link upcoming"><Icon name={icon}/><span>{label}</span><span className="soon">后续开放</span></div>)}</nav>
-      <div className="sidebar-bottom"><div className="sidebar-note"><span className="visual-icon lavender"><Icon name="spark" size={18}/></span><b>从一个项目开始</b><p>为每一次内容复盘，<br/>留下清晰的记录。</p></div><a className="help-link" href="https://github.com/yangzha-spec/content-intelligence#readme" target="_blank" rel="noreferrer"><Icon name="help" size={17}/>使用与开发说明<Icon name="arrow" size={14}/></a><div className="sidebar-version">CONTENT INTELLIGENCE <span>第一阶段</span></div></div>
+      <div className="sidebar-bottom"><div className="sidebar-note"><span className="visual-icon lavender"><Icon name="spark" size={18}/></span><b>从一个项目开始</b><p>为每一次内容复盘，<br/>留下清晰的记录。</p></div><a className="help-link" href="https://github.com/yangzha-spec/content-intelligence#readme" target="_blank" rel="noreferrer"><Icon name="help" size={17}/>使用与开发说明<Icon name="arrow" size={14}/></a><div className="sidebar-version">CONTENT INTELLIGENCE <span>导入预览</span></div></div>
     </aside>
     <div className="main-column"><header className="topbar"><div className="breadcrumb"><button className="icon-button mobile-menu" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="打开导航"><Icon name="layers"/></button><button onClick={() => navigate('')}>工作台</button><Icon name="chevron" size={13}/><span>{selectedId ? project?.name || '项目详情' : '我的项目'}</span></div><div className="topbar-right"><span className="private-pill"><Icon name="lock" size={12}/>私有工作空间</span><span className="user-avatar">{preview ? '预' : (session?.user.email || 'U').slice(0, 1).toUpperCase()}</span>{preview ? <button className="text-link" onClick={leavePreview}>{session ? '返回真实工作空间' : '登录账号'}</button> : <button className="icon-button" title="退出登录" aria-label="退出登录" onClick={signOut} disabled={busy}><Icon name="logout" size={18}/></button>}</div></header>
       {preview && <div className="preview-banner"><Icon name="eye" size={16}/><span><b>界面预览</b> · 以下为示例项目，不会写入数据库。</span><button onClick={leavePreview}>{session ? '返回工作空间' : '登录管理真实项目'} <Icon name="arrow" size={14}/></button></div>}
@@ -206,10 +211,10 @@ export default function WorkspaceApp() {
           <section className="projects-section" aria-labelledby="projects-title"><div className="list-toolbar"><h2 id="projects-title">全部项目 <span>{allProjects.length}</span></h2><div className="list-controls"><label className="search-input"><Icon name="search" size={17}/><input aria-label="搜索项目" placeholder="搜索项目名称、品牌…" value={search} onChange={e => setSearch(e.target.value)}/></label><select className="sort-select" aria-label="项目排序" value={sort} onChange={e => setSort(e.target.value)}><option value="recent">最近创建</option><option value="name">名称排序</option></select></div></div>
             {loading && !preview ? <div className="project-grid" aria-label="正在加载项目">{[1, 2, 3].map(n => <div className="skeleton-card" key={n}><i/><b/><p/><p/></div>)}</div> : !activeWorkspace && !workspaceLoading && !preview ? <div className="empty-state"><span className="empty-icon"><Icon name="layers" size={34}/></span><h3>先给内容洞察一个家</h3><p>创建你的工作空间，再按品牌或主题整理项目。</p><button className="primary-button" onClick={createWorkspace} disabled={busy}>{busy ? <span className="spinner"/> : <Icon name="plus" size={17}/>}创建我的工作空间</button></div> : allProjects.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="folder" size={34}/></span><h3>你的第一个项目，从这里开始</h3><p>为一个品牌、一个账号，或一次内容复盘建立项目。</p>{canWrite ? <button className="primary-button" onClick={() => setCreating(true)}><Icon name="plus" size={17}/>创建第一个项目</button> : <p className="small-label">你拥有只读权限，请联系空间所有者创建项目。</p>}</div> : visibleProjects.length === 0 ? <div className="empty-state compact-empty"><Icon name="search" size={32}/><h3>没有找到匹配的项目</h3><p>试试其他关键词，或清除搜索条件。</p><button className="secondary-button" onClick={() => setSearch('')}>清除搜索</button></div> : <div className="project-grid">{visibleProjects.map((p, i) => <button className="project-card" key={p.id} onClick={() => navigate(p.id)}><div className="card-top"><span className={`project-symbol color-${i % 3}`}><Icon name={i % 2 ? 'chart' : 'folder'} size={23}/></span><span className="project-status"><span/>项目已建立</span></div><h3>{p.name}</h3><p className="project-description">{p.description || '为这个项目导入数据，逐步建立属于你的内容洞察。'}</p><div className="project-tags"><span>{p.brand_name || '独立分析项目'}</span><span>{preview ? '示例项目' : '私有项目'}</span></div><div className="card-footer"><span>{dateLabel(p.created_at)}创建</span><span className="open-project">打开项目 <Icon name="arrow" size={16}/></span></div></button>)}{canWrite && <button className="new-project-card" onClick={() => preview ? leavePreview() : setCreating(true)}><span><Icon name="plus" size={23}/></span><b>开启一个新项目</b><p>{preview ? '登录后创建你的真实项目' : '给下一个想法，留一个空间'}</p></button>}</div>}
           </section><div className="workflow-note"><Icon name="lock" size={15}/><span>项目数据按工作空间隔离，仅成员可访问。</span></div>
-        </> : loading && !preview ? <div className="empty-state"><span className="spinner"/><p>正在读取项目…</p></div> : project ? <>
+        </> : loading && !preview ? <div className="empty-state"><span className="spinner"/><p>正在读取项目…</p></div> : project && importing ? <ImportPreview key={project.id} projectName={project.name} timezone={project.default_timezone} onBack={() => navigate(project.id)}/> : project ? <>
           <button className="back-link" onClick={() => navigate('')}><Icon name="arrow" size={16} style={{ transform: 'rotate(180deg)' }}/>返回全部项目</button><div className="detail-header"><span className="project-symbol color-0"><Icon name="folder" size={27}/></span><div><span className="eyebrow section-eyebrow">PROJECT WORKSPACE</span><h1>{project.name}</h1><p className="muted">{project.description || '一个新的内容探索，已经开始。'}</p></div></div><div className="detail-meta"><span><Icon name="layers" size={16}/>{project.brand_name || '独立分析项目'}</span><span>{dateLabel(project.created_at)}创建</span><span><Icon name="lock" size={14}/>空间成员可见</span></div>
           <section className="detail-onboarding"><span className="onboarding-number">01</span><div><span className="small-label">第一步已完成</span><h2>项目准备好了，下一步让数据进来。</h2><p>这个空间将承载你的内容记录、用户反馈和分析结果。</p></div><span className="done-pill"><Icon name="check" size={14}/>项目已创建</span></section>
-          <h2 className="next-section-heading">接下来，在这个项目里</h2><div className="feature-grid">{[['upload', '数据导入', '上传内容、指标和评论，查看字段映射与校验结果。', '下一阶段'], ['chart', '内容表现', '关注内容排名与变化趋势，让复盘有据可依。', '后续开放'], ['bubble', '评论洞察', '整理用户反馈，理解评论中的情感与主题。', '后续开放']].map(([icon, title, text, tag]) => <section className="feature-card" key={icon}><span className="feature-icon"><Icon name={icon} size={24}/></span><span className="stage-tag">{tag}</span><h3>{title}</h3><p>{text}</p></section>)}</div><p className="detail-limit">当前版本已支持项目管理。数据导入和分析将在后续阶段逐步开放。</p>
+          <h2 className="next-section-heading">接下来，在这个项目里</h2><div className="feature-grid">{[['upload', '数据导入', '选择内容、指标和评论文件，查看字段映射与本地校验结果。', '现已开放预览'], ['chart', '内容表现', '关注内容排名与变化趋势，让复盘有据可依。', '后续开放'], ['bubble', '评论洞察', '整理用户反馈，理解评论中的情感与主题。', '后续开放']].map(([icon, title, text, tag]) => <section className={`feature-card ${icon === 'upload' ? 'import-entry' : ''}`} key={icon}><span className="feature-icon"><Icon name={icon} size={24}/></span><span className="stage-tag">{tag}</span><h3>{title}</h3><p>{text}</p>{icon === 'upload' && <button className="text-link" onClick={openImport}>上传并预览<Icon name="arrow" size={15}/></button>}</section>)}</div><p className="detail-limit">已支持项目管理与本地导入预览。正式入库和分析将在后续部分开放。</p>
         </> : <div className="empty-state"><Icon name="folder" size={34}/><h2>暂时无法打开这个项目</h2><p>项目可能不属于当前工作空间，或你没有访问权限。</p><button className="secondary-button" onClick={() => navigate('')}>返回项目列表</button></div>}
       </main><footer className="workspace-footer"><span>Content Intelligence</span><span>每一份记录，都离洞察更近一步。</span></footer>
     </div>
@@ -217,5 +222,3 @@ export default function WorkspaceApp() {
     {toast && <div className="toast" role="status"><Icon name="check" size={18}/>{toast}<button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><Icon name="close" size={15}/></button></div>}
   </div>;
 }
-
-
