@@ -24,6 +24,7 @@ export default function ImportPreview({ projectName, timezone, onBack }: { proje
   const [onlyErrors, setOnlyErrors] = useState(false); const [page, setPage] = useState(0); const [issuePage, setIssuePage] = useState(0);
   const input = useRef<HTMLInputElement>(null); const request = useRef(0);
   useEffect(() => () => { request.current += 1; }, []);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }); }, [step]);
   const active = tables.find(table => table.id === activeId) || tables[0];
   const selectedTables = tables.filter(table => table.kind !== 'ignore');
   async function choose(selected: File[], isSample = false) {
