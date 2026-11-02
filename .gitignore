@@ -1,0 +1,23 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.next/
+dist/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+
+# 原始数据、导出文件和数据库凭据不得进入版本库。
+data/
+uploads/
+exports/
+*.csv
+*.xlsx
+*.parquet
+*.zip
+*.dump
+*.backup
+supabase/.temp/
+supabase/.branches/
