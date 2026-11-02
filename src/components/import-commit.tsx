@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { prepareImport, invokeImport } from '@/lib/import-client';
+import { issueReportCsv } from '@/lib/import-validation';
 import type { ImportSource, ServerResult } from '@/lib/import-contract';
 import type { ImportFileInfo, ImportTable, ValidationReport } from '@/lib/import-model';
 import { Icon } from './icon';
@@ -13,6 +14,12 @@ export default function ImportCommit({ projectId, projectName, timezone, origina
   const [accepted, setAccepted] = useState(false); const [busy, setBusy] = useState(false); const [progress, setProgress] = useState('');
   const [batchId, setBatchId] = useState(''); const [result, setResult] = useState<ServerResult | null>(null); const [error, setError] = useState('');
   const locked = busy || !!batchId; const allowed = canWrite && !preview;
+  function downloadReview() {
+    if (!result?.report) return;
+    const url = URL.createObjectURL(new Blob([issueReportCsv(result.report)], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'Content_Intelligence_Server_Quality_Report.csv'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   async function run(commit = false) {
     if (busy || !allowed || !accepted) return;
     setBusy(true); onBusy(true); setError('');
@@ -46,6 +53,7 @@ export default function ImportCommit({ projectId, projectName, timezone, origina
       {error && <div className="notice error" role="alert">{error}</div>}
       {progress && <div className="commit-progress" role="status"><span className="spinner"/>{progress}</div>}
       {result?.ready && <div className="notice success" role="status">服务器已重新读取原文件，{result.report?.summary.total} 条记录通过复核。确认入库时会再次检查，已有数据冲突将整批回滚。</div>}
+      {result?.ready && result.report && <div className="history-review" aria-label="服务器复核提示"><b>服务器复核提示 · {result.report.issues.length} 项</b>{result.report.issues.slice(0, 5).map((issue, i) => <p key={i}>{issue.source} · {issue.row || '整表'}：{issue.message}</p>)}{!result.report.issues.length && <p>没有额外质量提示。</p>}<button className="text-link" onClick={downloadReview}>下载服务器完整问题清单</button></div>}
       <div className="commit-actions"><button className="secondary-button" disabled={!allowed || !accepted || busy || !source.source_name.trim()} onClick={() => void run()}>{batchId ? '重新复核本批' : '上传原文件并复核'}</button><button className="primary-button" disabled={!allowed || !accepted || busy || !result?.ready} onClick={() => void run(true)}>确认入库<Icon name="arrow" size={16}/></button></div>
     </>}
   </section>;
