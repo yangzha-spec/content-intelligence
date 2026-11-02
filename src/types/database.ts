@@ -34,6 +34,7 @@ export type Database = {
           sample_type: string
           source_batch_id: string
           source_row_number: number
+          source_table: string | null
         }
         Insert: {
           comment_key?: string | null
@@ -54,6 +55,7 @@ export type Database = {
           sample_type?: string
           source_batch_id: string
           source_row_number: number
+          source_table?: string | null
         }
         Update: {
           comment_key?: string | null
@@ -74,6 +76,7 @@ export type Database = {
           sample_type?: string
           source_batch_id?: string
           source_row_number?: number
+          source_table?: string | null
         }
         Relationships: [
           {
@@ -116,6 +119,7 @@ export type Database = {
           social_account_id: string | null
           source_batch_id: string
           source_row_number: number
+          source_table: string | null
           tags: Json
           title: string
           topic: string | null
@@ -136,6 +140,7 @@ export type Database = {
           social_account_id?: string | null
           source_batch_id: string
           source_row_number: number
+          source_table?: string | null
           tags?: Json
           title: string
           topic?: string | null
@@ -156,6 +161,7 @@ export type Database = {
           social_account_id?: string | null
           source_batch_id?: string
           source_row_number?: number
+          source_table?: string | null
           tags?: Json
           title?: string
           topic?: string | null
@@ -194,9 +200,11 @@ export type Database = {
           error_message: string | null
           field_mapping: Json
           file_hash: string
+          file_manifest: Json
           file_name: string
           file_size_bytes: number
           id: string
+          import_config: Json
           license_name: string
           license_verified: boolean
           mapping_version: string
@@ -207,6 +215,7 @@ export type Database = {
           project_id: string
           public_demo_allowed: boolean
           quality_summary: Json
+          request_hash: string | null
           row_counts: Json
           source_name: string
           source_type: string
@@ -225,9 +234,11 @@ export type Database = {
           error_message?: string | null
           field_mapping?: Json
           file_hash: string
+          file_manifest?: Json
           file_name: string
           file_size_bytes: number
           id?: string
+          import_config?: Json
           license_name?: string
           license_verified?: boolean
           mapping_version?: string
@@ -238,6 +249,7 @@ export type Database = {
           project_id: string
           public_demo_allowed?: boolean
           quality_summary?: Json
+          request_hash?: string | null
           row_counts?: Json
           source_name: string
           source_type: string
@@ -256,9 +268,11 @@ export type Database = {
           error_message?: string | null
           field_mapping?: Json
           file_hash?: string
+          file_manifest?: Json
           file_name?: string
           file_size_bytes?: number
           id?: string
+          import_config?: Json
           license_name?: string
           license_verified?: boolean
           mapping_version?: string
@@ -269,6 +283,7 @@ export type Database = {
           project_id?: string
           public_demo_allowed?: boolean
           quality_summary?: Json
+          request_hash?: string | null
           row_counts?: Json
           source_name?: string
           source_type?: string
@@ -307,6 +322,7 @@ export type Database = {
           snapshot_type: string
           source_batch_id: string
           source_row_number: number
+          source_table: string | null
           views: number | null
         }
         Insert: {
@@ -327,6 +343,7 @@ export type Database = {
           snapshot_type?: string
           source_batch_id: string
           source_row_number: number
+          source_table?: string | null
           views?: number | null
         }
         Update: {
@@ -347,6 +364,7 @@ export type Database = {
           snapshot_type?: string
           source_batch_id?: string
           source_row_number?: number
+          source_table?: string | null
           views?: number | null
         }
         Relationships: [
@@ -519,7 +537,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      commit_import_batch: {
+        Args: {
+          expected_config: Json
+          expected_manifest: Json
+          payload: Json
+          target_batch: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

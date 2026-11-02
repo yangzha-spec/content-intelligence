@@ -35,15 +35,19 @@ const platforms: Record<string, string> = { youtube: 'youtube', weibo: 'weibo', 
 const types: Record<string, string> = { video: 'video', 视频: 'video', text: 'text', 文字: 'text', article: 'article', 文章: 'article', image: 'image', 图片: 'image', mixed: 'mixed', 图文: 'mixed', audio: 'audio', 音频: 'audio', live: 'live', 直播: 'live', other: 'other', 其他: 'other' };
 const sampleTypes = new Set(['all', 'latest', 'top', 'random', 'manual', 'unknown']);
 
-export function validateImport(tables: ImportTable[], timezone = 'Asia/Shanghai'): ValidationReport {
+export type ExistingPost = { content_key: string; publish_time: string; platform?: string; external_content_id?: string | null };
+export function validateImport(tables: ImportTable[], timezone = 'Asia/Shanghai', existing: ExistingPost[] = []): ValidationReport {
   const issues: Issue[] = []; const selected = tables.filter(t => t.kind !== 'ignore');
   const results: ValidationReport['tables'] = []; const refs = new Map<string, NormalizedRow[]>();
+  const existingKeys = new Set(existing.map(post => post.content_key));
+  const existingExternalIds = new Set(existing.filter(post => post.external_content_id).map(post => `${post.platform}\0${post.external_content_id}`));
+  for (const post of existing) refs.set(post.content_key, [{ sourceRow: 0, values: { ...post, timezone }, issues: [] }]);
   function issue(table: ImportTable, row: NormalizedRow | null, field: string, code: string, message: string, suggestion: string, severity: 'error' | 'warning' = 'error') {
     const item: Issue = { severity, tableId: table.id, source: table.source, kind: table.kind, row: row?.sourceRow || 0, field, code, message, suggestion };
     issues.push(item); row?.issues.push(item);
   }
   const batch: ImportTable = { id: 'batch', source: '本批文件', kind: 'Posts', headers: [], rows: [], mapping: {} };
-  if (!selected.some(t => t.kind === 'Posts')) issue(batch, null, 'Posts', 'MISSING_POSTS', '缺少内容表 Posts，无法核对内容关联。', '为一张表指定「内容 Posts」，或补充内容文件。');
+  if (!selected.some(t => t.kind === 'Posts') && !existing.length) issue(batch, null, 'Posts', 'MISSING_POSTS', '缺少内容表 Posts，无法核对内容关联。', '补充内容表；登录真实项目后也可关联项目内已有内容。');
   for (const kind of KINDS) {
     const found = selected.filter(t => t.kind === kind);
     if (found.length > 1) issue(batch, null, kind, 'MULTIPLE_TABLES', `本批有多张 ${kind} 表，无法确定唯一来源。`, '每类保留一张表，其余设为忽略，或合并后重新选择。');
@@ -96,6 +100,8 @@ export function validateImport(tables: ImportTable[], timezone = 'Asia/Shanghai'
         } catch (error) { issue(table, row, field.key, 'INVALID_VALUE', error instanceof Error ? error.message : `「${field.label}」无法解析。`, '核对原值、格式与字段映射，修正原文件后重试。'); }
       }
       if (kind === 'Posts') {
+        if (contentKey && existingKeys.has(contentKey)) issue(table, row, 'content_key', 'EXISTING_CONTENT', '内容编号已存在于项目，不能重复新增或自动覆盖。', '补充指标或评论时，移除或忽略已导入的 Posts，使用原内容编号关联。');
+        if (row.values.external_content_id && existingExternalIds.has(`${row.values.platform}\0${row.values.external_content_id}`)) issue(table, row, 'external_content_id', 'EXISTING_EXTERNAL_CONTENT', '该平台内容 ID 已在项目中存在。', '请使用已有内容编号，避免重复新增内容。');
         row.values.timezone = zone;
         try { Temporal.Now.instant().toZonedDateTimeISO(zone); }
         catch { issue(table, row, 'timezone', 'INVALID_TIMEZONE', '时区名称无法识别。', '填写 IANA 时区，例如 Asia/Shanghai。'); }
@@ -110,7 +116,7 @@ export function validateImport(tables: ImportTable[], timezone = 'Asia/Shanghai'
         }
         if (contentKey) { const list = refs.get(contentKey) || []; list.push(row); refs.set(contentKey, list); }
       } else {
-        if (contentKey && !matching?.length) issue(table, row, 'content_key', 'ORPHAN_CONTENT', '内容编号在本批 Posts 中不存在。', '补充对应内容，或修正内容编号；本阶段不查询项目内历史数据。');
+        if (contentKey && !matching?.length) issue(table, row, 'content_key', 'ORPHAN_CONTENT', '内容编号在本批 Posts 或已核对的项目历史中不存在。', '补充对应内容，或核对项目和内容编号。');
         else if (matching && (matching.length > 1 || matching[0].issues.some(i => i.severity === 'error'))) issue(table, row, 'content_key', 'INVALID_PARENT', '关联内容存在错误或内容编号不唯一。', '先修正 Posts 的对应记录。');
         const timeField = kind === 'Metrics' ? 'snapshot_time' : 'comment_time';
         const time = row.values[timeField]; const publish = matching?.[0]?.values.publish_time;

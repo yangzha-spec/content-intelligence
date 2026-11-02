@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.118.0",
+    "papaparse": "npm:papaparse@5.7.0",
+    "@js-temporal/polyfill": "npm:@js-temporal/polyfill@0.5.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs"
+  }
+}

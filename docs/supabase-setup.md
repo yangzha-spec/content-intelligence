@@ -60,7 +60,7 @@ SUPABASE_SECRET_KEY=仅在服务端确有需要时填写
 ```
 
 前端可使用 publishable key，并配合用户登录与 RLS；secret key 只允许服务端使用。
-尚未创建网页应用，本阶段填写环境变量不会启动任何服务。
+网页应用已发布；公开配置用于前端构建，导入服务位于 Supabase Edge Functions。
 
 ## 4. 验证结果与后续验收
 
@@ -71,7 +71,7 @@ SUPABASE_SECRET_KEY=仅在服务端确有需要时填写
 - `supabase/checks/03_rls_smoke.sql` 在事务中模拟用户验证非成员隔离、viewer/editor 权限与 NULL/0，
   合成用户及业务行全部回滚；核对后数据库中没有留下测试记录。
 - 使用本地 publishable key，Auth settings API 返回 200，匿名读取内容表被 Data API 拒绝。
-- Supabase 安全检查无告警；性能检查仅有新库索引尚未使用的信息提示。
+- 阶段 0 的安全检查无告警，性能检查仅有新库索引尚未使用的信息提示。第三部分复查未发现数据库/Storage 策略告警；Auth 另有未启用泄露密码检测的提示，当前未修改该设置。
 - 已生成 `src/types/database.ts`。如数据库结构后续变化，应重新生成。
 
 可通过 `npm run check:connection` 复查公开密钥连接与匿名拒绝访问。
@@ -89,15 +89,17 @@ SQL Editor 通常以高权限角色执行，能查到数据不代表普通用户
 - 将 B 调整为 editor 后，B 可写项目数据，但不能添加成员或删除项目。
 - 原始文件上传功能上线前，完成下述 Storage 配置与隔离测试。
 
-## 5. 原始文件存储：待实现，上传功能的前置条件
+## 5. 原始文件存储：第三部分已实现
 
-后续增加迁移，创建 **private** 的 `raw-imports` Bucket，并限制上传大小和文件类型。
-对象名使用系统生成 ID，可按 `<project_id>/<batch_id>/<file_uuid>.<ext>` 组织。
+第三个迁移已创建 **private** 的 `raw-imports` Bucket，并限制上传大小和文件类型。
+对象名使用系统生成 ID，可按 `<project_id>/<batch_id>/<index>.<ext>` 组织。
 通过 Storage RLS 根据路径中的项目 ID 校验工作空间权限；无法归属的路径默认拒绝。
 报告使用单独的私有 Bucket，按项目权限下载。
 
-当前迁移只创建业务表，**不创建 Bucket，也不授予 Storage 访问权限**。
-上传解析、事务提交和文件清理均未实现。完成这些步骤前，不上传真实评论数据。
+Storage 策略要求对象路径匹配批次清单，并验证项目成员/编辑权限；原文件不允许客户端覆盖或删除。
+`import-batch` Edge Function 和 `commit_import_batch` 事务接口已部署，未增加 service_role 权限。
+真实账号上传、确认与下载仍待验收，先使用合成样本，见 [第三部分说明](part-3-acceptance.md)。
+文件保留期限及删除项目时清理原文件的流程尚未实现。
 
 ## 官方说明
 

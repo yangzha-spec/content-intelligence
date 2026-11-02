@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
+import { randomUUID } from 'node:crypto';
 
 // PostgreSQL engine, with a minimal stand-in for Supabase Auth.
 // Hosted Supabase Auth, Storage and HTTP integration still require a separate smoke test.
@@ -66,6 +67,12 @@ before(async () => {
     $$;
     grant usage on schema public, auth to anon, authenticated;
     grant execute on function auth.uid() to anon, authenticated;
+    create schema storage;
+    create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+    create table storage.objects(id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated, anon;
+    grant select, insert, update, delete on storage.objects to authenticated;
     create function public.rls_auto_enable() returns event_trigger
       language plpgsql security definer set search_path = '' as $$ begin end; $$;
   `);
@@ -113,6 +120,100 @@ before(async () => {
 });
 
 after(async () => { await db.close(); });
+
+async function importBatch(projectId = fixture.projectA, creator = users.alice) {
+  const id = randomUUID(); const path = `${projectId}/${id}/0.csv`;
+  const config = { timezone: 'Asia/Shanghai', encoding: 'utf-8', tables: [] };
+  const manifest = [{ name: 'Posts.csv', path, size: 100, sha256: hash, mime: 'text/csv' }];
+  await db.query(`insert into public.import_batches(id,project_id,created_by,file_name,file_hash,storage_path,file_size_bytes,mime_type,source_type,source_name,file_manifest,import_config,request_hash)
+    values($1,$2,$3,'Posts.csv',$4,$5,100,'text/csv','synthetic','atomic-test',$6,$7,$8)`, [id, projectId, creator, hash, path, JSON.stringify(manifest), JSON.stringify(config), id.replaceAll('-', '').padEnd(64, 'a')]);
+  await db.query(`insert into storage.objects(bucket_id,name) values('raw-imports',$1)`, [path]);
+  await db.query(`update public.import_batches set status='ready' where id=$1`, [id]);
+  return { id, config, manifest, path };
+}
+const newPost = (key = 'atomic_new') => ({ content_key: key, platform: 'youtube', account_key: 'new-account', title: 'Synthetic atomic post', content_type: 'video', publish_time: '2026-10-01T00:00:00Z', source_row_number: 2, source_table: 'Posts.csv' });
+const snapshot = (key = 'atomic_new') => ({ content_key: key, snapshot_time: '2026-10-03T00:00:00Z', snapshot_type: 'cumulative', metric_profile: 'synthetic_v1', views: null, likes: '0', impressions: '9223372036854775807', source_row_number: 2, source_table: 'Metrics.csv' });
+const comment = (key = 'atomic_new') => ({ content_key: key, comment_text: 'Synthetic comment', dedupe_hash: hash, dedupe_method: 'inferred', dedupe_confidence: 'low', sample_type: 'unknown', source_row_number: 2, source_table: 'Comments.csv' });
+const commitSql = 'select public.commit_import_batch($1,$2::jsonb,$3::jsonb,$4::jsonb) as result';
+const commitArgs = (batch, payload) => [batch.id, JSON.stringify(batch.config), JSON.stringify(batch.manifest), JSON.stringify(payload)];
+
+test('atomic import writes three datasets once, preserves NULL/zero/BIGINT, and records provenance', async () => {
+  await asUser(users.alice, async () => {
+    const batch = await importBatch();
+    const args = commitArgs(batch, { Posts: [newPost()], Metrics: [snapshot()], Comments: [comment()] });
+    const first = (await one(commitSql, args)).result;
+    assert.equal(first.already_applied, false);
+    assert.deepEqual(first.counts, { Posts: 1, Metrics: 1, Comments: 1 });
+    assert.equal((await one(commitSql, args)).result.already_applied, true);
+    assert.equal((await one('select count(*)::int as n from public.content_posts where source_batch_id=$1', [batch.id])).n, 1);
+    const metric = await one('select views, likes::text, impressions::text, missing_reasons,source_table from public.post_metrics where source_batch_id=$1', [batch.id]);
+    assert.equal(metric.views, null); assert.equal(metric.likes, '0'); assert.equal(metric.impressions, '9223372036854775807');
+    assert.equal(metric.missing_reasons.views, 'not_provided'); assert.equal(metric.source_table, 'Metrics.csv');
+    assert.equal((await one('select status from public.import_batches where id=$1', [batch.id])).status, 'success');
+    await expectError('update public.import_batches set error_message=$2 where id=$1', [batch.id, 'tampered'], 'P0001');
+  });
+});
+
+test('late duplicate snapshot rolls back new posts, accounts, comments and committing status', async () => {
+  await asUser(users.alice, async () => {
+    const batch = await importBatch();
+    const duplicate = { ...snapshot('post_1'), snapshot_time: '2026-10-02T00:00:00Z', metric_profile: 'youtube_fixture_v1' };
+    await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [duplicate], Comments: [comment()] }), '23505');
+    assert.equal((await one('select count(*)::int as n from public.content_posts where source_batch_id=$1', [batch.id])).n, 0);
+    assert.equal((await one("select count(*)::int as n from public.social_accounts where project_id=$1 and account_key='new-account'", [fixture.projectA])).n, 0);
+    assert.equal((await one('select status from public.import_batches where id=$1', [batch.id])).status, 'ready');
+    const retry = await one(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [snapshot()], Comments: [comment()] }));
+    assert.equal(retry.result.already_applied, false);
+  });
+});
+
+test('historical content accepts incremental snapshots/comments without inserting or overwriting Posts', async () => {
+  await asUser(users.editor, async () => {
+    const batch = await importBatch(fixture.projectA, users.editor);
+    const result = await one(commitSql, commitArgs(batch, { Posts: [], Metrics: [snapshot('post_1')], Comments: [comment('post_1')] }));
+    assert.equal(result.result.counts.Posts, 0);
+    assert.equal((await one('select count(*)::int as n from public.content_posts where project_id=$1', [fixture.projectA])).n, 1);
+  });
+});
+
+test('orphan and negative-count failures cannot leave a partial batch', async () => {
+  await asUser(users.alice, async () => {
+    const batch = await importBatch();
+    await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [snapshot('unknown')], Comments: [] }), 'P0001');
+    await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [{ ...snapshot(), likes: '-1' }], Comments: [] }), '23514');
+    assert.equal((await one('select count(*)::int as n from public.content_posts where source_batch_id=$1', [batch.id])).n, 0);
+  });
+});
+
+test('batch identity changes and missing private originals stop the commit', async () => {
+  await asUser(users.alice, async () => {
+    const batch = await importBatch();
+    await expectError('update public.import_batches set import_config=$2 where id=$1', [batch.id, '{}'], 'P0001');
+    const args = commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] });
+    await expectError(commitSql, [args[0], '{}', args[2], args[3]], 'P0001');
+  });
+  const batch = await importBatch();
+  await db.query('delete from storage.objects where name=$1', [batch.path]);
+  await asUser(users.alice, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] }), 'P0001'); });
+  await db.query('delete from public.import_batches where id=$1', [batch.id]);
+});
+
+test('private originals stay project-scoped and immutable; viewers can read but cannot upload or commit', async () => {
+  const batch = await importBatch();
+  for (const user of [users.alice, users.editor, users.viewer]) await asUser(user, async () => {
+    assert.equal((await one('select count(*)::int as n from storage.objects where name=$1', [batch.path])).n, 1);
+    assert.equal((await db.query('update storage.objects set name=$2 where name=$1 returning id', [batch.path, 'changed'])).rows.length, 0);
+    assert.equal((await db.query('delete from storage.objects where name=$1 returning id', [batch.path])).rows.length, 0);
+  });
+  await asUser(users.bob, async () => {
+    assert.equal((await one('select count(*)::int as n from storage.objects where name=$1', [batch.path])).n, 0);
+    await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] }), '42501');
+    await expectError("insert into storage.objects(bucket_id,name) values('raw-imports',$1)", [batch.path], '42501');
+  });
+  await asUser(users.viewer, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] }), '42501'); });
+  await asUser(null, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [], Metrics: [], Comments: [] }), '42501'); }, 'anon');
+  await db.query('delete from storage.objects where name=$1', [batch.path]); await db.query('delete from public.import_batches where id=$1', [batch.id]);
+});
 
 test('migration creates eight business tables and enables RLS on every table', async () => {
   const { rows } = await db.query(`select relname, relrowsecurity from pg_class
