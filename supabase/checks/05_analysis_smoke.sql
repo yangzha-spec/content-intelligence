@@ -1,0 +1,40 @@
+-- DB role/transaction verification only. All synthetic users and data roll back.
+begin;
+set local statement_timeout='20s';
+do $smoke$
+declare actor uuid:=gen_random_uuid(); outsider uuid:=gen_random_uuid(); workspace uuid; project uuid; batch uuid; post uuid; comment uuid; run uuid:=gen_random_uuid(); source jsonb; result jsonb;
+begin
+ insert into auth.users(id,email) values(actor,'ci-analysis-'||actor||'@example.invalid'),(outsider,'ci-analysis-'||outsider||'@example.invalid');
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
+ execute 'set local role authenticated';
+ insert into public.workspaces(name) values('Rollback-only analytics') returning id into workspace;
+ insert into public.projects(workspace_id,name) values(workspace,'Synthetic') returning id into project;
+ insert into public.import_batches(project_id,file_name,file_hash,storage_path,file_size_bytes,mime_type,source_type,source_name) values(project,'Synthetic.csv',repeat('a',64),'rollback-analysis/'||project,1,'text/csv','synthetic','rollback-only') returning id into batch;
+ insert into public.content_posts(project_id,content_key,platform,title,content_type,publish_time,source_batch_id,source_row_number) values(project,'synthetic','youtube','Synthetic','video','2026-10-01T00:00:00Z',batch,2) returning id into post;
+ insert into public.post_metrics(project_id,content_post_id,snapshot_time,metric_profile,views,likes,source_batch_id,source_row_number) values(project,post,'2026-10-02T00:00:00Z','synthetic_v1',9223372036854775807,0,batch,2);
+ insert into public.comments(project_id,content_post_id,comment_text,dedupe_hash,dedupe_method,dedupe_confidence,source_batch_id,source_row_number) values(project,post,'Synthetic',repeat('b',64),'inferred','low',batch,2) returning id into comment;
+ source:=public.get_analysis_source(project);
+ assert source->'metrics'->0->>'views'='9223372036854775807','Large integer precision lost';
+ result:=jsonb_build_object('version','analytics_v1.0','filters','{}'::jsonb,'sourceRevision',source->>'revision','sourceBatchIds',jsonb_build_array(batch),'metrics','{}'::jsonb,'comments',jsonb_build_object('rows',jsonb_build_array(jsonb_build_object('id',comment,'status','unknown','label','unknown','method','lexicon_zh_en_v1','evidence','[]'::jsonb,'topics','[]'::jsonb))),'insights','[]'::jsonb);
+ assert public.save_analysis_bundle(project,run,source,result,'# Synthetic report')=run,'Analysis save failed';
+ assert public.save_analysis_bundle(project,run,source,result,'# Synthetic report')=run,'Idempotency failed';
+ assert (select count(*)=1 from public.analysis_results where analysis_run_id=run),'Duplicate results';
+ assert (select count(*)=1 from public.reports where analysis_run_id=run),'Private report missing';
+ assert (select count(*)=1 from public.comment_analyses where analysis_run_id=run and sentiment='unknown'),'Unknown label lost';
+ insert into public.workspace_members(workspace_id,user_id,role) values(workspace,outsider,'viewer');
+ perform set_config('request.jwt.claim.sub',outsider::text,true);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',outsider,'role','authenticated')::text,true);
+ assert (select count(*)=1 from public.reports where analysis_run_id=run),'Viewer read failed';
+ begin perform public.save_analysis_bundle(project,gen_random_uuid(),source,result,'Denied');raise exception 'Viewer write unexpectedly allowed';exception when insufficient_privilege then null;end;
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ delete from public.workspace_members where workspace_id=workspace and user_id=outsider;
+ perform set_config('request.jwt.claim.sub',outsider::text,true);
+ assert not exists(select 1 from public.analysis_runs where id=run),'Nonmember history exposed';
+ assert not exists(select 1 from public.reports where analysis_run_id=run),'Nonmember report exposed';
+ begin perform public.get_analysis_source(project);raise exception 'Nonmember source exposed';exception when insufficient_privilege then null;end;
+ execute 'reset role';
+end;
+$smoke$;
+rollback;
+select true as cloud_analysis_smoke_passed,true as all_synthetic_rows_rolled_back;

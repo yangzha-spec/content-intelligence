@@ -9,6 +9,7 @@ import { findExistingPosts } from '@/lib/import-service';
 import { getSupabase } from '@/lib/supabase';
 import ImportCommit from './import-commit';
 import ImportHistory from './import-history';
+import { complexCsvFiles } from '@/lib/demo-data';
 import { FIELDS, KINDS, KIND_LABELS, displayCell, isBlank, suggestMapping, type DatasetKind, type ImportTable, type ImportFileInfo, type ValidationReport } from '@/lib/import-model';
 
 function download(text: string, name: string, type = 'text/csv;charset=utf-8') {
@@ -52,6 +53,7 @@ export default function ImportPreview({ projectId, projectName, timezone, canWri
     const data = sampleCsvFiles(withErrors);
     void choose(KINDS.map(kind => new File([data[kind]], `${kind}.csv`, { type: 'text/csv' })), true);
   }
+  function loadComplex() { const data = complexCsvFiles(); void choose(KINDS.map(kind => new File([data[kind]], `${kind}.csv`, { type: 'text/csv' })), true); }
   const reportTables = report?.tables.filter(table => table.kind === reportKind) || [];
   const reportRows = reportTables.flatMap(table => table.rows.map(row => ({ ...row, source: table.source, tableId: table.tableId })));
   const filteredRows = reportRows.filter(row => !onlyErrors || row.issues.some(issue => issue.severity === 'error'));
@@ -73,7 +75,7 @@ export default function ImportPreview({ projectId, projectName, timezone, canWri
         </div>
         <div className="encoding-row"><label>CSV 编码 <select aria-label="CSV 文件编码" value={encoding} disabled={busy} onChange={event => { setEncoding(event.target.value); request.current += 1; setTables([]); setFiles([]); setOriginals([]); setReport(null); setSample(false); setError(''); }}><option value="utf-8">UTF-8（推荐）</option><option value="gb18030">GB18030 / GBK</option></select></label><span>编码改变后需重新选择文件。</span></div>
         {!!files.length && <div className="loaded-files" aria-label="已读取文件">{files.map(file => <div key={file.name}><span className="file-symbol"><Icon name="layers" size={19}/></span><div><b>{file.name}</b><small>{(file.size / 1024).toFixed(1)} KiB · SHA-256 {file.sha256.slice(0, 12)}…</small></div><span className="file-ready"><Icon name="check" size={13}/>已读取</span></div>)}</div>}
-      </div><aside className="import-guide"><span className="eyebrow section-eyebrow">A LITTLE PREPARATION</span><h2>三类数据，各有位置。</h2><p>第一行放字段名。内容编号 <code>content_key</code> 用来连接内容、快照与评论。</p><div className="data-type-list">{KINDS.map((kind, index) => <div key={kind}><span className={`project-symbol color-${index}`}><Icon name={['folder', 'chart', 'bubble'][index]} size={18}/></span><div><b>{KIND_LABELS[kind]} <code>{kind}</code></b><small>{['一行，一篇内容', '一行，一个采集时刻', '一行，一条用户评论'][index]}</small></div><button className="text-link" onClick={() => download(templateCsv(kind), `${kind}_Template.csv`)}>CSV 模板<Icon name="arrow" size={12}/></button></div>)}</div><div className="guide-note">Excel 建议命名为 Posts、Metrics、Comments。自定义表名和字段可在下一步手动指定。</div><button className="secondary-button sample-button" onClick={() => loadSamples()} disabled={busy}><Icon name="spark" size={16}/>先用合成示例试一下</button><button className="text-link error-sample-link" onClick={() => loadSamples(true)} disabled={busy}>也可以看看含错误的示例</button></aside></div>
+      </div><aside className="import-guide"><span className="eyebrow section-eyebrow">A LITTLE PREPARATION</span><h2>三类数据，各有位置。</h2><p>第一行放字段名。内容编号 <code>content_key</code> 用来连接内容、快照与评论。</p><div className="data-type-list">{KINDS.map((kind, index) => <div key={kind}><span className={`project-symbol color-${index}`}><Icon name={['folder', 'chart', 'bubble'][index]} size={18}/></span><div><b>{KIND_LABELS[kind]} <code>{kind}</code></b><small>{['一行，一篇内容', '一行，一个采集时刻', '一行，一条用户评论'][index]}</small></div><button className="text-link" onClick={() => download(templateCsv(kind), `${kind}_Template.csv`)}>CSV 模板<Icon name="arrow" size={12}/></button></div>)}</div><div className="guide-note">Excel 建议命名为 Posts、Metrics、Comments。自定义表名和字段可在下一步手动指定。</div><button className="secondary-button sample-button" onClick={() => loadSamples()} disabled={busy}><Icon name="spark" size={16}/>先用合成示例试一下</button><button className="secondary-button sample-button" style={{marginTop:10}} onClick={loadComplex} disabled={busy}><Icon name="chart" size={16}/>复杂样本：360 内容 / 2,400 评论</button><button className="text-link error-sample-link" onClick={() => loadSamples(true)} disabled={busy}>也可以看看含错误的示例</button></aside></div>
       {!!tables.length && <div className="import-bottom"><span><b>{tables.length}</b> 张表 · <b>{tables.reduce((sum, table) => sum + table.rows.length, 0)}</b> 条非空记录已读取</span><button className="primary-button" onClick={() => setStep(2)}>继续：字段映射<Icon name="arrow" size={17}/></button></div>}
     </>}
     {step === 2 && <>

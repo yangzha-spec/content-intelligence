@@ -14,6 +14,142 @@ export type Database = {
   }
   public: {
     Tables: {
+      analysis_results: {
+        Row: {
+          analysis_run_id: string
+          id: string
+          project_id: string
+          result: Json
+          result_key: string
+        }
+        Insert: {
+          analysis_run_id: string
+          id?: string
+          project_id: string
+          result: Json
+          result_key: string
+        }
+        Update: {
+          analysis_run_id?: string
+          id?: string
+          project_id?: string
+          result?: Json
+          result_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_results_project_id_analysis_run_id_fkey"
+            columns: ["project_id", "analysis_run_id"]
+            isOneToOne: false
+            referencedRelation: "analysis_runs"
+            referencedColumns: ["project_id", "id"]
+          },
+        ]
+      }
+      analysis_runs: {
+        Row: {
+          ai_status: string
+          created_at: string
+          created_by: string
+          engine_version: string
+          filters: Json
+          id: string
+          model_version: string | null
+          project_id: string
+          source_batch_ids: Json
+          source_revision: string
+          source_snapshot: Json
+          status: string
+        }
+        Insert: {
+          ai_status?: string
+          created_at?: string
+          created_by?: string
+          engine_version: string
+          filters: Json
+          id?: string
+          model_version?: string | null
+          project_id: string
+          source_batch_ids: Json
+          source_revision: string
+          source_snapshot: Json
+          status: string
+        }
+        Update: {
+          ai_status?: string
+          created_at?: string
+          created_by?: string
+          engine_version?: string
+          filters?: Json
+          id?: string
+          model_version?: string | null
+          project_id?: string
+          source_batch_ids?: Json
+          source_revision?: string
+          source_snapshot?: Json
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_runs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      comment_analyses: {
+        Row: {
+          analysis_run_id: string
+          comment_id: string
+          evidence: Json
+          id: string
+          method_version: string
+          project_id: string
+          sentiment: string
+          status: string
+          topics: Json
+        }
+        Insert: {
+          analysis_run_id: string
+          comment_id: string
+          evidence?: Json
+          id?: string
+          method_version: string
+          project_id: string
+          sentiment: string
+          status: string
+          topics?: Json
+        }
+        Update: {
+          analysis_run_id?: string
+          comment_id?: string
+          evidence?: Json
+          id?: string
+          method_version?: string
+          project_id?: string
+          sentiment?: string
+          status?: string
+          topics?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comment_analyses_project_id_analysis_run_id_fkey"
+            columns: ["project_id", "analysis_run_id"]
+            isOneToOne: false
+            referencedRelation: "analysis_runs"
+            referencedColumns: ["project_id", "id"]
+          },
+          {
+            foreignKeyName: "comment_analyses_project_id_comment_id_fkey"
+            columns: ["project_id", "comment_id"]
+            isOneToOne: false
+            referencedRelation: "comments"
+            referencedColumns: ["project_id", "id"]
+          },
+        ]
+      }
       comments: {
         Row: {
           comment_key: string | null
@@ -303,6 +439,38 @@ export type Database = {
           },
         ]
       }
+      insights: {
+        Row: {
+          analysis_run_id: string
+          content: Json
+          id: string
+          insight_key: string
+          project_id: string
+        }
+        Insert: {
+          analysis_run_id: string
+          content: Json
+          id?: string
+          insight_key: string
+          project_id: string
+        }
+        Update: {
+          analysis_run_id?: string
+          content?: Json
+          id?: string
+          insight_key?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insights_project_id_analysis_run_id_fkey"
+            columns: ["project_id", "analysis_run_id"]
+            isOneToOne: false
+            referencedRelation: "analysis_runs"
+            referencedColumns: ["project_id", "id"]
+          },
+        ]
+      }
       post_metrics: {
         Row: {
           comments_count: number | null
@@ -432,6 +600,44 @@ export type Database = {
           },
         ]
       }
+      reports: {
+        Row: {
+          analysis_run_id: string
+          body: string
+          created_at: string
+          format: string
+          id: string
+          project_id: string
+          title: string
+        }
+        Insert: {
+          analysis_run_id: string
+          body: string
+          created_at?: string
+          format: string
+          id?: string
+          project_id: string
+          title: string
+        }
+        Update: {
+          analysis_run_id?: string
+          body?: string
+          created_at?: string
+          format?: string
+          id?: string
+          project_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_project_id_analysis_run_id_fkey"
+            columns: ["project_id", "analysis_run_id"]
+            isOneToOne: false
+            referencedRelation: "analysis_runs"
+            referencedColumns: ["project_id", "id"]
+          },
+        ]
+      }
       social_accounts: {
         Row: {
           account_key: string | null
@@ -545,6 +751,19 @@ export type Database = {
           target_batch: string
         }
         Returns: Json
+      }
+      get_analysis_source: { Args: { target_project: string }; Returns: Json }
+      save_analysis_bundle: {
+        Args: {
+          ai_state?: string
+          analysis: Json
+          model_name?: string
+          report_body: string
+          run_id: string
+          source_data: Json
+          target_project: string
+        }
+        Returns: string
       }
     }
     Enums: {

@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
+import { analyze } from '../src/lib/analytics.ts';
 
 // PostgreSQL engine, with a minimal stand-in for Supabase Auth.
 // Hosted Supabase Auth, Storage and HTTP integration still require a separate smoke test.
@@ -121,6 +122,40 @@ before(async () => {
 
 after(async () => { await db.close(); });
 
+test('analysis source uses caller RLS and serializes large integer observations as text', async () => {
+  await asUser(users.alice, async () => {
+    await db.query('update public.post_metrics set impressions=9223372036854775807 where project_id=$1',[fixture.projectA]);
+    const source=(await one('select public.get_analysis_source($1) as data',[fixture.projectA])).data;
+    assert.equal(source.metrics[0].impressions,'9223372036854775807');assert.equal(source.posts.length,1);assert.equal(source.comments.length,1);assert.ok(source.revision);
+  });
+  await asUser(users.bob,async()=>{await expectError('select public.get_analysis_source($1)',[fixture.projectA],'42501');});
+});
+test('analysis bundle is atomic, immutable, idempotent and readable by viewers', async () => {
+  await asUser(users.alice,async()=>{
+    const source=(await one('select public.get_analysis_source($1) as data',[fixture.projectA])).data;
+    const result=analyze(source,{platform:'youtube',profile:'youtube_fixture_v1',start:'2026-10-01',end:'2026-10-31',metric:'views',topic:'',timezone:'Asia/Shanghai'});
+    const id=randomUUID();const sql='select public.save_analysis_bundle($1,$2,$3,$4,$5) as id';const args=[fixture.projectA,id,JSON.stringify(source),JSON.stringify(result),'# Synthetic report'];
+    assert.equal((await one(sql,args)).id,id);assert.equal((await one(sql,args)).id,id);
+    assert.equal((await one('select count(*)::int as n from public.analysis_results where analysis_run_id=$1',[id])).n,1);
+    assert.equal((await one('select count(*)::int as n from public.comment_analyses where analysis_run_id=$1',[id])).n,1);
+    await expectError('update public.analysis_runs set status=\'failed\' where id=$1',[id],'42501');
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.viewer]);
+    assert.equal((await one('select count(*)::int as n from public.reports where analysis_run_id=$1',[id])).n,1);
+    await expectError(sql,[fixture.projectA,randomUUID(),JSON.stringify(source),JSON.stringify(result),'Denied'],'42501');
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.bob]);
+    assert.equal((await one('select count(*)::int as n from public.reports where analysis_run_id=$1',[id])).n,0);
+  });
+});
+test('invalid cross-project comment results roll back the entire analysis bundle', async () => {
+  await asUser(users.alice,async()=>{
+    const source=(await one('select public.get_analysis_source($1) as data',[fixture.projectA])).data;
+    const result=analyze(source,{platform:'youtube',profile:'youtube_fixture_v1',start:'2026-10-01',end:'2026-10-31',metric:'views',topic:'',timezone:'Asia/Shanghai'});
+    result.comments.rows[0].id=randomUUID();const id=randomUUID();
+    await expectError('select public.save_analysis_bundle($1,$2,$3,$4,$5)',[fixture.projectA,id,JSON.stringify(source),JSON.stringify(result),'# Synthetic'],'23503');
+    assert.equal((await one('select count(*)::int as n from public.analysis_runs where id=$1',[id])).n,0);
+  });
+});
+
 async function importBatch(projectId = fixture.projectA, creator = users.alice) {
   const id = randomUUID(); const path = `${projectId}/${id}/0.csv`;
   const config = { timezone: 'Asia/Shanghai', encoding: 'utf-8', tables: [] };
@@ -215,10 +250,10 @@ test('private originals stay project-scoped and immutable; viewers can read but 
   await db.query('delete from storage.objects where name=$1', [batch.path]); await db.query('delete from public.import_batches where id=$1', [batch.id]);
 });
 
-test('migration creates eight business tables and enables RLS on every table', async () => {
+test('migration creates thirteen business tables and enables RLS on every table', async () => {
   const { rows } = await db.query(`select relname, relrowsecurity from pg_class
     where relnamespace = 'public'::regnamespace and relkind = 'r'`);
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 13);
   assert.ok(rows.every((row) => row.relrowsecurity));
 });
 

@@ -56,10 +56,9 @@ supabase/migrations/20261102104754_harden_rls_and_fk_indexes.sql
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=项目URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=项目的publishable_key
-SUPABASE_SECRET_KEY=仅在服务端确有需要时填写
 ```
 
-前端可使用 publishable key，并配合用户登录与 RLS；secret key 只允许服务端使用。
+前端可使用 publishable key，并配合用户登录与 RLS；当前服务不需要高权限 secret key。
 网页应用已发布；公开配置用于前端构建，导入服务位于 Supabase Edge Functions。
 
 ## 4. 验证结果与后续验收
@@ -94,12 +93,24 @@ SQL Editor 通常以高权限角色执行，能查到数据不代表普通用户
 第三个迁移已创建 **private** 的 `raw-imports` Bucket，并限制上传大小和文件类型。
 对象名使用系统生成 ID，可按 `<project_id>/<batch_id>/<index>.<ext>` 组织。
 通过 Storage RLS 根据路径中的项目 ID 校验工作空间权限；无法归属的路径默认拒绝。
-报告使用单独的私有 Bucket，按项目权限下载。
+报告正文存于 RLS 保护的数据库，Markdown/HTML 文件按需生成，没有新增报告 Bucket。
 
 Storage 策略要求对象路径匹配批次清单，并验证项目成员/编辑权限；原文件不允许客户端覆盖或删除。
 `import-batch` Edge Function 和 `commit_import_batch` 事务接口已部署，未增加 service_role 权限。
 真实账号上传、确认与下载仍待验收，先使用合成样本，见 [第三部分说明](part-3-acceptance.md)。
 文件保留期限及删除项目时清理原文件的流程尚未实现。
+
+## 6. 内容分析与报告：第四部分已实现
+
+`20261104024355_analytics_and_reports.sql` 已应用，现有 13 张业务表均启用 RLS。
+新增 `analysis_runs`、`analysis_results`、`comment_analyses`、`insights`、`reports`，保存当时输入、筛选、处理版本、证据与报告正文。
+`get_analysis_source` 在单个数据库快照中返回源数据，并在 JSON 化之前把 BIGINT 转为文本；`save_analysis_bundle` 单事务写入并处理重复请求。
+`analyze-project` 已部署，保持用户 JWT 鉴权，不额外授予 service_role 权限。
+
+2026-11-04：自动测试共 94 项通过，类型检查与生产构建通过；云端 `05_analysis_smoke.sql` 验证精度、保存、重复请求、viewer 只读和非成员隔离，测试记录全部回滚。
+真实账号登录、文件上传下载和分析历史的完整 HTTP 流程依照用户要求留到最终验收。
+可选外部 AI 只在 Edge Functions 配置 `OPENAI_API_KEY` 和 `OPENAI_MODEL`，并在页面确认本次调用后启用；当前尚未配置或进行真实付费调用。
+完整范围见 [第四部分说明](part-4-acceptance.md)。
 
 ## 官方说明
 
