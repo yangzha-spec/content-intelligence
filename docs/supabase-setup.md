@@ -135,3 +135,9 @@ V0.6 已实现默认持续保留、所有者逐批确认清理和删除项目前
 - [数据库迁移](https://supabase.com/docs/guides/local-development/database-migrations)
 - [行级权限 RLS](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [API Keys](https://supabase.com/docs/guides/getting-started/api-keys)
+
+## 9. 评论私有草稿：第八部分已实现
+
+`20261104081423_comment_review_drafts.sql` 已应用；公共业务表 14 张，另有 2 张 private AI 控制表。新表开启 RLS，仅作者且仍有项目权限可读取；作者为 owner/editor 时可写。SECURITY INVOKER 保存 RPC 和版本触发器共同处理冲突及重复确认，不新增 service_role 授权。无需重新部署分析/导入 Edge Function。
+`08_review_drafts_smoke.sql` 验证保存、重复确认、版本冲突、直接更新保护、同空间作者隔离、editor 自有草稿和 viewer 拒绝；合成记录全部回滚，无 Storage/AI 操作。本地共 148 项测试。安全检查没有本次新增项；原有两项 private 默认拒绝 INFO 及 Auth 泄露密码保护 WARN 未变，后者见 [密码保护说明](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)。性能检查只有未使用索引 INFO，测试空项目不足以据此删除索引。
+真实账号跨设备/并发 HTTP 验收仍留到最后。详见 [第八部分](part-8-acceptance.md)。

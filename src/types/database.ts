@@ -150,6 +150,44 @@ export type Database = {
           },
         ]
       }
+      comment_review_drafts: {
+        Row: {
+          actor_id: string
+          base_revision: number
+          packet: Json
+          project_id: string
+          revision: number
+          scope_hash: string
+          updated_at: string
+        }
+        Insert: {
+          actor_id?: string
+          base_revision?: number
+          packet: Json
+          project_id: string
+          revision?: number
+          scope_hash: string
+          updated_at?: string
+        }
+        Update: {
+          actor_id?: string
+          base_revision?: number
+          packet?: Json
+          project_id?: string
+          revision?: number
+          scope_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comment_review_drafts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       comments: {
         Row: {
           comment_key: string | null
@@ -800,6 +838,15 @@ export type Database = {
           target_project: string
         }
         Returns: string
+      }
+      save_comment_review_draft: {
+        Args: {
+          draft_packet: Json
+          expected_revision: number
+          target_project: string
+          target_scope: string
+        }
+        Returns: Json
       }
     }
     Enums: {

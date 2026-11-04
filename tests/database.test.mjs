@@ -360,10 +360,10 @@ test('private originals stay project-scoped and immutable; viewers can read but 
   await db.query('delete from storage.objects where name=$1', [batch.path]); await discardLocalBatch(batch);
 });
 
-test('migration creates thirteen business tables and enables RLS on every table', async () => {
+test('migration creates fourteen business tables and enables RLS on every table', async () => {
   const { rows } = await db.query(`select relname, relrowsecurity from pg_class
     where relnamespace = 'public'::regnamespace and relkind = 'r'`);
-  assert.equal(rows.length, 13);
+  assert.equal(rows.length, 14);
   assert.ok(rows.every((row) => row.relrowsecurity));
 });
 
@@ -591,4 +591,53 @@ test('project deletion cascades through its data while preserving other projects
     }
     assert.equal((await one('select count(*)::int as n from public.projects where id = $1', [fixture.projectA2])).n, 1);
   });
+});
+
+
+async function draftPacket(project=fixture.projectA,changes={}) {
+ const comment=await one('select id from public.comments where project_id=$1 limit 1',[project]);
+ return {schema:'ci_review_v1',context:{projectId:project,scopeHash:hash,sourceRevision:'fixture_v1',synthetic:false,rowCount:1,methods:['rules_v1'],filters:{platform:'youtube',profile:'fixture',metric:'views',topic:'',start:'2026-10-01',end:'2026-10-31',timezone:'UTC'}},savedAt:'2026-11-04T08:00:00.000Z',annotations:[{commentId:comment.id,label:'neutral',topics:null,note:'',reviewer:'Review A',reviewedAt:'2026-11-04T08:00:00.000Z',origin:'manual'}],...changes};
+}
+const saveDraft=(packet,expected=0)=>one('select public.save_comment_review_draft($1,$2,$3,$4::jsonb) as result',[packet.context.projectId,packet.context.scopeHash,expected,JSON.stringify(packet)]);
+
+test('review drafts persist labels, confirm lost responses idempotently and reject stale versions',async()=>{
+ await asUser(users.alice,async()=>{const p=await draftPacket();const first=(await saveDraft(p)).result;assert.equal(first.revision,1);assert.deepEqual(first.packet,p);
+ const retry=(await saveDraft({...p,savedAt:'2026-11-04T08:01:00.000Z'})).result;assert.equal(retry.revision,1);
+ const changed=structuredClone(p);changed.annotations[0].note='Reviewed again';assert.equal((await saveDraft(changed,1)).result.revision,2);
+ p.annotations[0].label='positive';await expectError('select public.save_comment_review_draft($1,$2,$3,$4::jsonb)',[fixture.projectA,hash,1,JSON.stringify(p)],'P0001');
+ assert.equal((await one('select revision from public.comment_review_drafts')).revision,2);
+ });
+});
+test('review drafts are private to the authenticated author even within one workspace',async()=>{
+ await asUser(users.editor,async()=>{const p=await draftPacket();await saveDraft(p);
+ await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.alice]);assert.equal((await one('select count(*)::int n from public.comment_review_drafts')).n,0);
+ await saveDraft(p);assert.equal((await one('select count(*)::int n from public.comment_review_drafts')).n,1);
+ await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.bob]);assert.equal((await one('select count(*)::int n from public.comment_review_drafts')).n,0);
+ });
+});
+test('review draft writes deny viewers, nonmembers and anonymous callers',async()=>{
+ const p=await draftPacket();for(const user of [users.viewer,users.bob])await asUser(user,()=>expectError('select public.save_comment_review_draft($1,$2,0,$3::jsonb)',[fixture.projectA,hash,JSON.stringify(p)],'42501'));
+ await asUser(null,()=>expectError('select * from public.comment_review_drafts',[],'42501'),'anon');
+ await asUser(null,()=>expectError('select public.save_comment_review_draft($1,$2,0,$3::jsonb)',[fixture.projectA,hash,JSON.stringify(p)],'42501'),'anon');
+});
+test('review drafts reject invalid records atomically without modifying stored labels',async()=>{
+ await asUser(users.alice,async()=>{const p=await draftPacket();await saveDraft(p);
+ const bads=[];for(const mutate of [q=>q.annotations.push(q.annotations[0]),q=>q.annotations[0].note='x'.repeat(241),q=>q.annotations[0].topics=['wrong'],q=>q.annotations[0].origin='example',q=>q.context.synthetic=true,q=>q.context.scopeHash='b'.repeat(64),q=>q.annotations[0].rawText='unapproved']){const q=structuredClone(p);mutate(q);bads.push(q);}
+ for(const q of bads)await expectError('select public.save_comment_review_draft($1,$2,1,$3::jsonb)',[fixture.projectA,hash,JSON.stringify(q)],'P0001');
+ assert.equal((await one('select revision from public.comment_review_drafts')).revision,1);
+ });
+});
+test('review draft comments cannot refer to a different project and context cannot move ownership',async()=>{
+ await asUser(users.alice,async()=>{const p=await draftPacket();p.annotations[0].commentId=(await one('select id from public.comments where project_id=$1',[fixture.projectA2]))?.id||randomUUID();
+ await expectError('select public.save_comment_review_draft($1,$2,0,$3::jsonb)',[fixture.projectA,hash,JSON.stringify(p)],'P0001');
+ await expectError('insert into public.comment_review_drafts(project_id,actor_id,scope_hash,packet) values($1,$2,$3,$4::jsonb)',[fixture.projectA,users.editor,hash,JSON.stringify(p)],'42501');
+ });
+});
+test('direct Data API updates also require a current revision and cannot alter ownership or server metadata',async()=>{
+ await asUser(users.alice,async()=>{const p=await draftPacket();await saveDraft(p);p.annotations[0].note='Changed';
+ await expectError('update public.comment_review_drafts set packet=$1::jsonb',[JSON.stringify(p)],'P0001');
+ const updated=await one('update public.comment_review_drafts set packet=$1::jsonb,base_revision=1 returning revision',[JSON.stringify(p)]);assert.equal(updated.revision,2);
+ await expectError('update public.comment_review_drafts set actor_id=$1',[users.editor],'42501');await expectError('update public.comment_review_drafts set revision=100',[],'42501');
+ await expectError('delete from public.comment_review_drafts',[],'42501');
+ });
 });

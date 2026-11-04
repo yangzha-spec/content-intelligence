@@ -126,13 +126,13 @@ export default function WorkspaceApp() {
   const [importing, setImporting] = useState(false);
   const reviewDirtyRef = useRef(false); const reviewLocationRef = useRef('');
   const reviewDirtyChange = useCallback((dirty: boolean) => { reviewDirtyRef.current = dirty; }, []);
-  const blockReviewLeave = useCallback(() => { if (!reviewDirtyRef.current) return false; setToast('请先回到评论洞察保存标注，并下载 JSON 复核文件，再离开项目。'); return true; }, []);
+  const blockReviewLeave = useCallback(() => { if (!reviewDirtyRef.current) return false; setToast('请先回到评论洞察保存草稿或下载 JSON 复核文件，再离开项目。'); return true; }, []);
   const [analysisView, setAnalysisView] = useState<AnalysisView | null>(null);
   const [creating, setCreating] = useState(false); const [busy, setBusy] = useState(false); const [sidebarOpen, setSidebarOpen] = useState(false);
   const [refresh, setRefresh] = useState(0); const userId = session?.user.id;
   useEffect(() => {
     setPreview(new URLSearchParams(window.location.search).get('preview') === '1');
-    const readLocation = () => { if (reviewDirtyRef.current) { window.history.pushState(null, '', reviewLocationRef.current); setToast('请先下载 JSON 复核文件，再离开当前复核集。'); return; } reviewLocationRef.current = window.location.href; const query = new URLSearchParams(window.location.search); setSelectedId(query.get('project') || ''); setImporting(query.get('view') === 'import'); setAnalysisView(['performance','comments','insights','report','history'].includes(query.get('view') || '') ? query.get('view') as AnalysisView : null); };
+    const readLocation = () => { if (reviewDirtyRef.current) { window.history.pushState(null, '', reviewLocationRef.current); setToast('请先保存草稿或下载 JSON 复核文件，再离开当前复核集。'); return; } reviewLocationRef.current = window.location.href; const query = new URLSearchParams(window.location.search); setSelectedId(query.get('project') || ''); setImporting(query.get('view') === 'import'); setAnalysisView(['performance','comments','insights','report','history'].includes(query.get('view') || '') ? query.get('view') as AnalysisView : null); };
     readLocation(); window.addEventListener('popstate', readLocation);
     let alive = true;
     try {
