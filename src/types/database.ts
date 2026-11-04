@@ -765,8 +765,30 @@ export type Database = {
         }
         Returns: Json
       }
+      finish_ai_call: {
+        Args: {
+          failure?: string
+          final_state: string
+          outcome?: Json
+          provider_id?: string
+          target_run: string
+          token: string
+        }
+        Returns: Json
+      }
       finish_original_cleanup: { Args: { target_batch: string }; Returns: Json }
+      get_ai_call_status: { Args: never; Returns: Json }
       get_analysis_source: { Args: { target_project: string }; Returns: Json }
+      reserve_ai_call: {
+        Args: {
+          allow_acquire?: boolean
+          input_hash: string
+          target_project: string
+          target_run: string
+          token: string
+        }
+        Returns: Json
+      }
       save_analysis_bundle: {
         Args: {
           ai_state?: string

@@ -43,3 +43,7 @@
 ## 官方依据
 
 [Supabase 删除对象](https://supabase.com/docs/guides/storage/management/delete-objects)：物理删除必须使用 Storage API，不能只删除 SQL 元数据。
+
+## V0.8 更新
+
+AI 调用次数、并发预约和不自动重发的恢复控制已实现，见 [第七部分](part-7-acceptance.md)。旧阶段记录中的控制待办以该部分为准；真实付费和跨实例 HTTP 验收尚未完成。

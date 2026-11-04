@@ -2,9 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '../types/database.ts';
 import { analyze, validateFilters, type Analysis, type AnalysisSource, type Filters } from './analytics.ts';
 import { analysisMarkdown } from './analysis-report.ts';
-import { enrichActions, type AiConfig } from './ai-insights.ts';
+import type { AiConfig } from './ai-insights.ts';
+import { controlledAi } from './ai-controls.ts';
 import { stableJson } from './import-contract.ts';
 export async function runProjectAnalysis(client: SupabaseClient<Database>, input: { project_id: string; run_id: string; filters: Filters; use_ai?: boolean; consent?: boolean }, actorId: string, config: AiConfig, call: typeof fetch = fetch) {
+  if((input.use_ai!==undefined&&typeof input.use_ai!=='boolean')||(input.consent!==undefined&&typeof input.consent!=='boolean'))throw new Error('AI 开关与同意状态必须为明确的布尔值。');
   const { data: project, error: projectError } = await client.from('projects').select('id,name,workspace_id,default_timezone').eq('id',input.project_id).single();
   if(projectError||!project)throw new Error('项目不存在或当前账号没有访问权限。');
   const { data: member } = await client.from('workspace_members').select('role').eq('workspace_id',project.workspace_id).eq('user_id',actorId).single();
@@ -24,10 +26,10 @@ export async function runProjectAnalysis(client: SupabaseClient<Database>, input
   let analysis=analyze(source,filters);let aiStatus='not_requested';let model:string|null=null;
   if(input.use_ai){
     if(input.consent!==true)throw new Error('启用外部 AI 前，请确认本次发送汇总数据和可能产生 API 费用。');
-    if(!config.apiKey||!config.model)throw new Error('外部模型尚未配置，请先使用统计与规则建议。');
-    try{analysis=await enrichActions(analysis,config,call);aiStatus='generated';model=config.model;}
-    catch{aiStatus='failed';model=config.model;analysis={...analysis,warnings:[...analysis.warnings,'外部模型调用未完成或结果未通过证据校验，本报告使用原有统计与规则建议。']};}
+    const controlled=await controlledAi(client,analysis,source,project.id,input.run_id,config,call);
+    analysis=controlled.analysis;aiStatus=controlled.aiStatus;model=controlled.model;
   }
+  analysis={...analysis,ai:{status:aiStatus,model}};
   const body=analysisMarkdown(analysis,project.name,false);
   const saved=await client.rpc('save_analysis_bundle',{target_project:project.id,run_id:input.run_id,source_data:source as unknown as Json,analysis:analysis as unknown as Json,report_body:body,ai_state:aiStatus,model_name:model??undefined});
   if(saved.error)throw new Error('分析结果未完整保存，事务已回滚。请使用同一请求重试。');

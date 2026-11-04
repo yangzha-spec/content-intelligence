@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { analyze, aggregate, classifyComment, validateFilters } from '../src/lib/analytics.ts';
 import { demoData, complexCsvFiles } from '../src/lib/demo-data.ts';
 import { analysisMarkdown, reportHtml, rankingCsv } from '../src/lib/analysis-report.ts';
-import { enrichActions } from '../src/lib/ai-insights.ts';
+import { enrichActions,aiRequestBody } from '../src/lib/ai-insights.ts';
 const filters = { platform:'youtube', profile:'test_v1', start:'2026-10-01', end:'2026-10-03', metric:'views', topic:'', timezone:'Asia/Shanghai' };
 const post = { id:'p1', content_key:'p1', platform:'youtube', title:'Synthetic', content_type:'video', topic:'测试', publish_time:'2026-10-01T02:00:00Z',source_batch_id:'b1' };
 const metric = { id:'m1', content_post_id:'p1', snapshot_time:'2026-10-02T02:00:00Z', snapshot_type:'cumulative',metric_profile:'test_v1',source_batch_id:'b1',views:'10',likes:'0',comments_count:null,shares:null,saves:null,impressions:null,reach:null };
@@ -48,7 +48,27 @@ test('reports label synthetic data and escape embedded HTML and CSV formula pref
 });
 test('optional AI receives aggregate facts only and cannot change evidence, observations or numbers',async()=>{
  const a=analyze(source([metric],[{...post,title:'Private secret title'}]),filters);let prompt='';
- const enriched=await enrichActions(a,{apiKey:'test-key',model:'test-model'},async(url,opts)=>{prompt=opts.body;return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({actions:a.insights.map(i=>({id:i.id,action:'人工复核后提炼表达，并在后续内容中验证。'}))})}]}]}));});
+ const enriched=await enrichActions(a,{apiKey:'test-key',model:'test-model',enabled:true},async(url,opts)=>{prompt=opts.body;return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({actions:a.insights.map(i=>({id:i.id,action:'人工复核后提炼表达，并在后续内容中验证。'}))})}]}]}));});
  assert.ok(!prompt.includes('Private secret title'));assert.deepEqual(enriched.insights.map(i=>i.evidence),a.insights.map(i=>i.evidence));assert.equal(enriched.metrics.views.sum,a.metrics.views.sum);
- await assert.rejects(enrichActions(a,{apiKey:'test-key',model:'test-model'},async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({actions:a.insights.map(i=>({id:i.id,action:'提升 50%'}))})}]}]}))),/AI_INVALID/);
+ await assert.rejects(enrichActions(a,{apiKey:'test-key',model:'test-model',enabled:true},async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({actions:a.insights.map(i=>({id:i.id,action:'提升 50%'}))})}]}]}))),/invalid_output/);
+});
+
+test('AI enable switch and payload bounds prevent HTTP requests before opt-in',async()=>{
+ const a=analyze(source(),filters);let calls=0;
+ await assert.rejects(enrichActions(a,{apiKey:'key',model:'model',enabled:false},async()=>{calls++;throw Error('unexpected')}),/AI_NOT_CONFIGURED/);assert.equal(calls,0);
+ const tooLarge={...a,metrics:{...a.metrics,views:{...a.metrics.views,sum:'1'.repeat(17000)}}};assert.throws(()=>aiRequestBody(tooLarge,{apiKey:'key',model:'model',enabled:true}),/invalid_output/);
+});
+test('AI request trace is correlation metadata and output controls do not disclose raw source',async()=>{
+ const a=analyze(source(),filters);let calls=0;
+ await enrichActions(a,{apiKey:'key',model:'explicit-model',enabled:true},async(url,options)=>{calls++;const body=JSON.parse(options.body);assert.equal(options.headers['X-Client-Request-Id'],'ci-fixture');assert.equal(body.max_output_tokens,1200);assert.equal(body.store,false);assert.ok(options.signal);return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({actions:a.insights.map(i=>({id:i.id,action:'人工复核后验证表达。'}))})}]}]}));},{clientRequestId:'ci-fixture'});assert.equal(calls,1);
+});
+test('AI report exports distinguish uncertainty and escape model provenance',()=>{
+ const a={...analyze(source(),filters),ai:{status:'uncertain',model:'<script>model</script>'}};
+ assert.ok(analysisMarkdown(a,'Synthetic',false).includes('调用结果未确认'));const html=reportHtml(a,'Synthetic',false);assert.ok(html.includes('&lt;script&gt;model'));assert.ok(!html.includes('<script>model'));
+});
+
+test('malformed provider output is invalid, while an interrupted response body remains uncertain',async()=>{
+ const a=analyze(source(),filters);const config={apiKey:'key',model:'model',enabled:true};
+ for(const output of [{status:'completed',output:'bad'},{status:'completed',output:[{content:[{type:'output_text',text:'{"actions":[null]}'}]}]}])await assert.rejects(enrichActions(a,config,async()=>new Response(JSON.stringify(output))),e=>e.code==='invalid_output'&&e.uncertain===false);
+ await assert.rejects(enrichActions(a,config,async()=>new Response(new ReadableStream({start(controller){controller.error(new TypeError('Interrupted fixture stream'));}}))),e=>e.code==='timeout_network'&&e.uncertain===true);
 });

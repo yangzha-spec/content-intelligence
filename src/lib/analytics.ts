@@ -12,6 +12,7 @@ export type Aggregate = { sum: string | null; mean: string | null; median: strin
 export type CommentResult = { id: string; content_post_id: string; text: string; sample_type: string; status: 'success' | 'unknown'; label: 'positive' | 'negative' | 'neutral' | 'unknown'; evidence: string[]; topics: string[]; method: string };
 export type Insight = { id: string; title: string; observation: string; action: string; evidence: string[]; limitation: string };
 export type Analysis = {
+  ai?: {status:string;model:string|null};
   version: string; filters: Filters; cutoff: string; sourceRevision: string; capturedAt: string; sourceBatchIds: string[];
   postCount: number; snapshotCount: number; selectedSnapshotCount: number; missingSnapshots: number | null;
   metrics: Record<Metric, Aggregate>; ranking: (Post & { value: string | null; snapshot_time: string | null; commentSample: number })[];

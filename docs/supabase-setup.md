@@ -121,6 +121,15 @@ V0.6 已实现默认持续保留、所有者逐批确认清理和删除项目前
 `06_original_lifecycle_smoke.sql` 的云端回滚验证通过，没有创建或删除任何 Storage 文件。
 目前共 102 项自动测试通过。真实 Storage 删除、跨账号 HTTP、上传/清理并发仍留到最终账号验收，详见 [第五部分说明](part-5-acceptance.md)。
 
+## 8. AI 调用限制与恢复：第七部分已实现
+
+`20261104064510_ai_call_controls.sql` 已应用，新增 2 张 private 内部表，公共业务表仍为 13 张。控制表没有向普通用户开放直接读写。
+全球/个人计数通过 private 中有意限制权限的函数进行，公共 RPC 保持用户会话；不使用或增加 service_role 业务权限。
+`analyze-project` 已更新，状态接口返回本人用量，开启新模型调用需要显式 `AI_ENABLED=true` 和密钥/模型；本次没有设置这些付费配置。
+`07_ai_controls_smoke.sql` 验证重复请求、临时令牌、并发预约、每日次数和 viewer/非成员隔离；没有调用服务商，全部合成记录回滚。
+数据库安全检查中两项 RLS 无策略 INFO 对应上述 private 表：它们有意采用默认拒绝，不向用户授予表权限。说明见 [RLS 检查项](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)。Auth 现有泄露密码检测提示未修改。
+本地 136 项测试通过。完整配置、恢复边界和待验收项见 [第七部分](part-7-acceptance.md)。
+
 ## 官方说明
 
 - [数据库迁移](https://supabase.com/docs/guides/local-development/database-migrations)

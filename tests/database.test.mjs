@@ -9,6 +9,7 @@ import { analyze } from '../src/lib/analytics.ts';
 // Hosted Supabase Auth, Storage and HTTP integration still require a separate smoke test.
 const db = new PGlite();
 const users = {
+  extra: '00000000-0000-0000-0000-000000000005',
   alice: '00000000-0000-0000-0000-000000000001',
   bob: '00000000-0000-0000-0000-000000000002',
   editor: '00000000-0000-0000-0000-000000000003',
@@ -121,6 +122,50 @@ before(async () => {
 });
 
 after(async () => { await db.close(); });
+
+const reserveAi=(project=fixture.projectA,run=randomUUID(),token=randomUUID(),enabled=true)=>({sql:'select public.reserve_ai_call($1,$2,$3,$4,$5) as result',args:[project,run,hash,token,enabled],run,token});
+const finishAi=(request,state='failed',actions=[])=>one('select public.finish_ai_call($1,$2,$3,$4::jsonb) as result',[request.run,request.token,state,JSON.stringify(actions)]);
+test('AI ledger stays private, anonymous and non-editors cannot reserve, and usage is actor-scoped',async()=>{
+ await asUser(users.viewer,async()=>{await expectError('select public.reserve_ai_call($1,$2,$3,$4,true)',[fixture.projectA,randomUUID(),hash,randomUUID()],'42501');assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,0);await expectError('select * from private.ai_call_requests',[],'42501');});
+ await asUser(users.bob,async()=>{const r=reserveAi();await expectError(r.sql,r.args,'42501');});
+ await asUser(null,async()=>{await expectError('select public.get_ai_call_status()',[],'42501');},'anon');
+ await asUser(users.editor,async()=>{const r=reserveAi();assert.equal((await one(r.sql,r.args)).result.decision,'acquired');await finishAi(r);assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,1);await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.alice]);assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,0);});
+});
+test('AI reservations are one-shot, secret-bound and cached without spending quota twice',async()=>{
+ await asUser(users.alice,async()=>{const disabled=reserveAi(fixture.projectA,randomUUID(),randomUUID(),false);assert.equal((await one(disabled.sql,disabled.args)).result.decision,'disabled');
+  const r=reserveAi();assert.equal((await one(r.sql,r.args)).result.decision,'acquired');assert.equal((await one(r.sql,[...r.args.slice(0,3),randomUUID(),true])).result.decision,'in_progress');
+  const other=reserveAi();assert.equal((await one(other.sql,other.args)).result.code,'AI_CONCURRENCY_LIMIT');
+  await expectError('select public.finish_ai_call($1,$2,$3)',[r.run,randomUUID(),'failed'],'42501');
+  await expectError('select public.finish_ai_call($1,$2,$3,$4::jsonb)',[r.run,r.token,'generated',JSON.stringify([{id:'top-content',action:'提升 50%'}])],'P0001');
+  const actions=[{id:'top-content',action:'人工核对后再验证表达。'}];assert.equal((await finishAi(r,'generated',actions)).result.state,'generated');
+  const cached=(await one(r.sql,[...r.args.slice(0,3),randomUUID(),false])).result;assert.equal(cached.decision,'cached');assert.deepEqual(cached.actions,actions);assert.ok(!('lease_token' in cached));
+  assert.equal((await finishAi(r,'failed')).result.state,'generated');assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,1);
+  await expectError(r.sql,[fixture.projectA,r.run,'b'.repeat(64),r.token,true],'P0001');
+ });
+});
+test('personal daily cap includes failures across projects and cannot be edited or refunded by API users',async()=>{
+ await asUser(users.alice,async()=>{for(let i=0;i<5;i++){const r=reserveAi(i%2?fixture.projectA2:fixture.projectA);assert.equal((await one(r.sql,r.args)).result.decision,'acquired');await finishAi(r);}
+  const r=reserveAi();assert.equal((await one(r.sql,r.args)).result.code,'AI_USER_DAILY_LIMIT');const status=(await one('select public.get_ai_call_status() as data')).data;assert.equal(status.used_today,5);assert.equal(status.remaining_today,0);assert.equal(status.day_timezone,'UTC');
+  await expectError('delete from private.ai_call_requests',[],'42501');await expectError('update private.ai_call_policy set user_daily_limit=999',[],'42501');
+ });
+});
+test('global daily cap accounts for other users without exposing their rows',async()=>{
+ await asUser(users.alice,async()=>{
+  for(const actor of [users.alice,users.bob,users.editor,users.viewer]){await db.query("select set_config('request.jwt.claim.sub',$1,true)",[actor]);const w=(await one("insert into public.workspaces(name) values('Global quota fixture') returning id")).id;const p=(await one("insert into public.projects(workspace_id,name) values($1,'Fixture') returning id",[w])).id;for(let i=0;i<5;i++){const r=reserveAi(p);assert.equal((await one(r.sql,r.args)).result.decision,'acquired');await finishAi(r);}}
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.extra]);const w=(await one("insert into public.workspaces(name) values('Extra actor fixture') returning id")).id;const p=(await one("insert into public.projects(workspace_id,name) values($1,'Fixture') returning id",[w])).id;
+  const r=reserveAi(p);const result=(await one(r.sql,r.args)).result;assert.equal(result.code,'AI_GLOBAL_DAILY_LIMIT');assert.ok(result.retry_after>0);assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,0);
+ });
+});
+test('expired AI reservations become uncertain and never reacquire for the same run',async()=>{
+ await asUser(users.alice,async()=>{const r=reserveAi();await one(r.sql,r.args);
+  await db.exec('reset role');await db.query("update private.ai_call_requests set lease_expires_at=clock_timestamp()-interval '1 second' where run_id=$1",[r.run]);await db.exec('set local role authenticated');
+  const cached=(await one(r.sql,[...r.args.slice(0,3),randomUUID(),true])).result;assert.equal(cached.decision,'cached');assert.equal(cached.state,'uncertain');assert.equal((await finishAi(r,'generated',[{id:'top-content',action:'保留证据并复核。'}])).result.state,'uncertain');
+  const next=reserveAi();assert.equal((await one(next.sql,next.args)).result.decision,'acquired');assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,2);
+ });
+});
+test('project deletion cannot reset AI quota receipts',async()=>{
+ await asUser(users.alice,async()=>{const r=reserveAi();await one(r.sql,r.args);await finishAi(r);await db.query('delete from public.projects where id=$1',[fixture.projectA]);assert.equal((await one('select public.get_ai_call_status() as data')).data.used_today,1);});
+});
 
 test('analysis source uses caller RLS and serializes large integer observations as text', async () => {
   await asUser(users.alice, async () => {

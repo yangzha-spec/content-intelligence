@@ -28,6 +28,10 @@
 
 [![评论人工复核与评估演练](docs/screenshots/comment-review.jpg)](docs/screenshots/comment-review.jpg)
 
+运营建议页增加调用限制与恢复说明，演示明确显示默认策略，不展示虚构的真实用量。
+
+[![AI 调用次数限制与恢复](docs/screenshots/ai-call-controls.jpg)](docs/screenshots/ai-call-controls.jpg)
+
 同一份演示源数据按筛选生成结果，例如单独选择 YouTube 后为 120 篇内容、800 条评论；全部平台评论还会按评论日期筛选，所以并非每张图都显示完整的 2,400 条。
 
 ## 已实现功能
@@ -71,15 +75,18 @@ http://127.0.0.1:3000/?preview=1&project=10000000-0000-4000-8000-000000000001&vi
 4. 配置邮箱确认回跳地址，在应用注册和登录后创建自己的项目。
 5. 上传并复核 → 确认入库 → 分析 → 保存分析与报告。只有显示「已入库」或保存成功才表示写入完成。
 
-当前云端有 13 张业务表，全部启用 RLS；owner/editor 可写、viewer 可读，非成员不可访问。
+当前云端有 13 张业务表，全部启用 RLS；owner/editor 可写、viewer 可读，非成员不可访问。另有 2 张 `private` 内部调用控制表，不直接向用户授予表读写权限。
 分析和导入服务均使用用户会话，不使用 service_role，也没有把高权限密钥放进前端。
 报告正文和分析输入快照保存在受 RLS 保护的数据库中，导出时生成文件；不会额外留下报告 Storage 对象。
 
 ### 可选 OpenAI 辅助
 
-只在 Supabase Edge Function 服务端设置 `OPENAI_API_KEY` 和 `OPENAI_MODEL`，不要添加 `NEXT_PUBLIC_` 前缀或提交密钥。模型名称由部署者明确选择。
+只在 Supabase Edge Function 服务端设置 `OPENAI_API_KEY`、`OPENAI_MODEL`，并显式设置 `AI_ENABLED=true`，不要添加 `NEXT_PUBLIC_` 前缀或提交密钥。模型名称由部署者明确选择。
 页面默认不调用 AI。用户确认后只发送汇总指标、主题计数和已有建议 ID，不发送原始评论、标题、正文或账号信息。
-API 调用可能产生费用；未经实际配置和测试，不能宣称模型联调或效果评估已经通过。
+默认关闭新调用。按 UTC 计日：每人最多 5 次、应用总计最多 20 次，同时最多 1 个有效预约；请求体上限 16 KiB，输出最多 1,200 tokens，等待最多 45 秒。
+同一分析请求复用检查点；结果不明不自动重发，失败和未确认的预约也计数。本标签页保留最近未确认请求编号与筛选，刷新后手动恢复，不会自动调用；关闭标签页后不保留。报告保存失败后保留同一请求编号恢复；新数据或模型不默默复用旧调用。
+只有初筛/统计而没有可形成建议的证据时，不预约、也不声称 AI 生成。查看 [调用控制与恢复](docs/part-7-acceptance.md)。
+API 调用可能产生费用。次数和输出限制不是金额硬预算，不覆盖其他应用对同一密钥的使用；真实付费调用和服务商侧预算配置仍待实测。
 
 ## 计算规则
 
@@ -100,8 +107,8 @@ npm run build
 npm run check:connection
 ```
 
-目前 **114 项自动测试通过**。PGlite 执行真实迁移 SQL 验证权限、精度、事务和回滚；服务测试使用真实 Supabase JS 客户端配合模拟 HTTP。
-云端 `03`、`04`、`05`、`06` 检查脚本使用事务内合成用户验证 RLS、导入、分析保存、私有报告与重复提交，所有测试数据均回滚。
+目前 **136 项自动测试通过**。PGlite 执行真实迁移 SQL 验证权限、精度、事务和回滚；服务测试使用真实 Supabase JS 客户端配合模拟 HTTP。
+云端 `03`、`04`、`05`、`06`、`07` 检查脚本使用事务内合成用户验证 RLS、导入、分析保存、私有报告与重复提交，所有测试数据均回滚。
 浏览器已验证复杂样本 3,840 条记录、跨平台汇总限制、评论搜索、HTML 报告实际下载和窄屏布局。
 
 人工复核仅在浏览器内处理，需下载 JSON 保存；CSV 会包含原文，JSON 不自动附带原文但保留自填备注。标注者自行填写，没有身份核验、双人一致性裁决或可信测试集证明。教学标注只用于操作演练。
@@ -118,6 +125,7 @@ npm run check:connection
 - [登录与项目管理](docs/part-1-acceptance.md) · [导入预览](docs/part-2-acceptance.md) · [确认入库](docs/part-3-acceptance.md)
 - [分析、评论、建议与报告](docs/part-4-acceptance.md) · [原文件保留与清理](docs/part-5-acceptance.md)
 - [评论人工复核与评估](docs/part-6-acceptance.md) · [标注指南](docs/comment-annotation-guide.md)
+- [AI 调用限制与恢复](docs/part-7-acceptance.md)
 - [截图与合成数据说明](docs/screenshots/README.md) · [变更记录](CHANGELOG.md)
 
 ## 产品呈现参考
