@@ -20,7 +20,7 @@ function download(text: string, name: string, type = 'text/csv;charset=utf-8') {
 const short = (value: unknown, length = 48) => { const text = displayCell(value); return text.length > length ? `${text.slice(0, length)}…` : text; };
 const PAGE = 10;
 
-export default function ImportPreview({ projectId, projectName, timezone, canWrite, preview, onBack }: { projectId: string; projectName: string; timezone: string; canWrite: boolean; preview: boolean; onBack: () => void }) {
+export default function ImportPreview({ projectId, projectName, timezone, canWrite, canManage, preview, onBack }: { projectId: string; projectName: string; timezone: string; canWrite: boolean; canManage: boolean; preview: boolean; onBack: () => void }) {
   const [step, setStep] = useState(1); const [tables, setTables] = useState<ImportTable[]>([]);
   const [files, setFiles] = useState<ImportFileInfo[]>([]); const [activeId, setActiveId] = useState('');
   const [originals, setOriginals] = useState<File[]>([]); const [historyRefresh, setHistoryRefresh] = useState(0);
@@ -100,6 +100,6 @@ export default function ImportPreview({ projectId, projectName, timezone, canWri
       <div className="import-bottom"><button className="secondary-button" onClick={() => setStep(2)}>返回调整映射</button><div className="next-phase"><span>{hasErrors ? '请先修正所有错误。' : '下一步填写来源，再私有保存。'}</span><button className="primary-button" disabled={hasErrors || !report.summary.total} onClick={() => setStep(4)}>继续：来源与入库<Icon name="arrow" size={16}/></button></div></div>
     </>}
     {report && <div hidden={step !== 4}><ImportCommit projectId={projectId} projectName={projectName} timezone={timezone} originals={originals} files={files} tables={tables} encoding={encoding} sample={sample} canWrite={canWrite} preview={preview} onBusy={setBusy} onReport={report => { setReport(report); setStep(3); }} onSaved={() => setHistoryRefresh(n => n + 1)} onReset={() => { setOriginals([]); setFiles([]); setTables([]); setReport(null); setSample(false); setStep(1); }}/></div>}
-    <ImportHistory projectId={projectId} preview={preview} canWrite={canWrite} refresh={historyRefresh}/>
+    <ImportHistory projectId={projectId} preview={preview} canWrite={canWrite} canManage={canManage} refresh={historyRefresh}/>
   </section>;
 }

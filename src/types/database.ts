@@ -346,6 +346,10 @@ export type Database = {
           mapping_version: string
           mime_type: string
           notes: string | null
+          originals_cleanup_by: string | null
+          originals_cleanup_started_at: string | null
+          originals_deleted_at: string | null
+          originals_state: string
           platform: string | null
           processing_version: string
           project_id: string
@@ -380,6 +384,10 @@ export type Database = {
           mapping_version?: string
           mime_type: string
           notes?: string | null
+          originals_cleanup_by?: string | null
+          originals_cleanup_started_at?: string | null
+          originals_deleted_at?: string | null
+          originals_state?: string
           platform?: string | null
           processing_version?: string
           project_id: string
@@ -414,6 +422,10 @@ export type Database = {
           mapping_version?: string
           mime_type?: string
           notes?: string | null
+          originals_cleanup_by?: string | null
+          originals_cleanup_started_at?: string | null
+          originals_deleted_at?: string | null
+          originals_state?: string
           platform?: string | null
           processing_version?: string
           project_id?: string
@@ -743,6 +755,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      begin_original_cleanup: { Args: { target_batch: string }; Returns: Json }
       commit_import_batch: {
         Args: {
           expected_config: Json
@@ -752,6 +765,7 @@ export type Database = {
         }
         Returns: Json
       }
+      finish_original_cleanup: { Args: { target_batch: string }; Returns: Json }
       get_analysis_source: { Args: { target_project: string }; Returns: Json }
       save_analysis_bundle: {
         Args: {

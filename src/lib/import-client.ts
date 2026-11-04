@@ -24,12 +24,13 @@ export async function prepareImport(projectId: string, originals: File[], files:
   }).select('*').single();
   let batch = inserted;
   if (insertError?.code === '23505') {
-    const existing = await client.from('import_batches').select('*').eq('project_id', projectId).eq('request_hash', fingerprint).single();
+    const existing = await client.from('import_batches').select('*').eq('project_id', projectId).eq('request_hash', fingerprint).or('originals_state.eq.retained,status.eq.success').single();
     if (existing.error) throw new Error('无法恢复相同文件的批次，请刷新导入历史。');
     batch = existing.data;
   } else if (insertError) throw new Error('无法建立批次，请确认当前项目的编辑权限。');
   if (!batch) throw new Error('批次创建未完成。');
   if (batch.status === 'success') return { batchId: batch.id, complete: true };
+  if (batch.originals_state && batch.originals_state !== 'retained') throw new Error('本批原文件正在清理或已清理，请刷新后建立新批次。');
   if (batch.status === 'ready') return { batchId: batch.id, complete: false };
   const stored = batch.file_manifest as unknown as ImportManifest;
   for (let i = 0; i < stored.length; i += 1) {

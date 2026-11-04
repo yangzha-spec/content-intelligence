@@ -27,6 +27,7 @@ export async function processImport(client: SupabaseClient<Database>, batchId: s
   const { data: member } = await client.from('workspace_members').select('role').eq('workspace_id', project.workspace_id).eq('user_id', actorId).single();
   if (!member || !['owner', 'editor'].includes(member.role)) throw new Error('只有空间所有者和编辑者可以导入数据。');
   if (batch.status === 'success') return { batch_id: batch.id, result: { batch_id: batch.id, already_applied: true, counts: batch.row_counts as Record<string, number> } };
+  if (batch.originals_state && batch.originals_state !== 'retained') throw new Error('本批原文件已开始清理，不能重新复核或入库。请建立新批次。');
   const manifest = validateManifest(batch.file_manifest, batch.project_id, batch.id);
   const config = batch.import_config as unknown as ImportConfig;
   if (config.timezone !== project.default_timezone) throw new Error('项目时区已改变，请用当前时区重新建立导入批次。');

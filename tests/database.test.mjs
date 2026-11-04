@@ -172,6 +172,59 @@ const comment = (key = 'atomic_new') => ({ content_key: key, comment_text: 'Synt
 const commitSql = 'select public.commit_import_batch($1,$2::jsonb,$3::jsonb,$4::jsonb) as result';
 const commitArgs = (batch, payload) => [batch.id, JSON.stringify(batch.config), JSON.stringify(batch.manifest), JSON.stringify(payload)];
 
+test('owner cleanup retains imported rows and provenance; direct, early and cross-role deletion are denied', async () => {
+  await asUser(users.alice, async () => {
+    const batch=await importBatch();
+    await one(commitSql,commitArgs(batch,{Posts:[newPost()],Metrics:[snapshot()],Comments:[comment()]}));
+    assert.equal((await one("delete from storage.objects where name=$1 returning name",[batch.path])),undefined);
+    await expectError('select public.finish_original_cleanup($1)',[batch.id],'P0001');
+    await expectError('delete from public.projects where id=$1',[fixture.projectA],'P0001');
+    await expectError('delete from public.workspaces where id=$1',[fixture.workspaceA],'P0001');
+    for(const actor of [users.editor,users.viewer,users.bob]){
+      await db.query("select set_config('request.jwt.claim.sub',$1,true)",[actor]);
+      await expectError('select public.begin_original_cleanup($1)',[batch.id],'42501');
+    }
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.alice]);
+    const plan=(await one('select public.begin_original_cleanup($1) as data',[batch.id])).data;
+    assert.equal(plan.state,'deleting'); assert.deepEqual(plan.files,batch.manifest);
+    assert.equal((await one('select public.begin_original_cleanup($1) as data',[batch.id])).data.state,'deleting');
+    await expectError('select public.finish_original_cleanup($1)',[batch.id],'P0001');
+    await expectError("insert into storage.objects(bucket_id,name) values('raw-imports',$1)",[batch.path],'42501');
+    await expectError("update public.import_batches set error_message='tampered' where id=$1",[batch.id],'P0001');
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.editor]);
+    assert.equal(await one('delete from storage.objects where name=$1 returning name',[batch.path]),undefined);
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.alice]);
+    // PGlite models metadata only; the real app removes bytes through Storage API.
+    assert.equal((await one('delete from storage.objects where name=$1 returning name',[batch.path])).name,batch.path);
+    assert.equal((await one('select public.finish_original_cleanup($1) as data',[batch.id])).data.state,'deleted');
+    assert.equal((await one('select public.finish_original_cleanup($1) as data',[batch.id])).data.state,'deleted');
+    const audit=await one('select originals_cleanup_by,originals_deleted_at,file_manifest from public.import_batches where id=$1',[batch.id]);
+    assert.equal(audit.originals_cleanup_by,users.alice); assert.ok(audit.originals_deleted_at); assert.deepEqual(audit.file_manifest,batch.manifest);
+    assert.equal((await one('select count(*)::int as n from public.content_posts where source_batch_id=$1',[batch.id])).n,1);
+    assert.equal((await one(commitSql,commitArgs(batch,{Posts:[],Metrics:[],Comments:[]}))).result.already_applied,true);
+    await expectError("update public.import_batches set originals_state='retained',originals_cleanup_started_at=null,originals_cleanup_by=null,originals_deleted_at=null where id=$1",[batch.id],'P0001');
+    await db.query('delete from public.projects where id=$1',[fixture.projectA]);
+    assert.equal((await one('select count(*)::int as n from public.projects where id=$1',[fixture.projectA])).n,0);
+  });
+});
+
+test('abandoned batches stop imports after cleanup starts and allow a fresh batch with the same fingerprint', async () => {
+  await asUser(users.alice,async()=>{
+    const batch=await importBatch();
+    const request=(await one('select request_hash from public.import_batches where id=$1',[batch.id])).request_hash;
+    await db.query("update public.import_batches set status='failed' where id=$1",[batch.id]);
+    await one('select public.begin_original_cleanup($1)',[batch.id]);
+    await expectError(commitSql,commitArgs(batch,{Posts:[newPost()],Metrics:[],Comments:[]}),'P0001');
+    await expectError("update public.import_batches set status='ready' where id=$1",[batch.id],'P0001');
+    await expectError('delete from public.import_batches where id=$1',[batch.id],'P0001');
+    const other=await importBatch();
+    await expectError('update public.import_batches set request_hash=$1 where id=$2',[request,other.id],'P0001');
+    const id=randomUUID();
+    await db.query(`insert into public.import_batches(id,project_id,file_name,file_hash,storage_path,file_size_bytes,mime_type,source_type,source_name,request_hash) values($1,$2,'Reupload.csv',$3,$4,1,'text/csv','synthetic','retry',$5)`,[id,fixture.projectA,hash,`${fixture.projectA}/${id}/0.csv`,request]);
+    assert.notEqual(id,batch.id);
+  });
+});
+
 test('atomic import writes three datasets once, preserves NULL/zero/BIGINT, and records provenance', async () => {
   await asUser(users.alice, async () => {
     const batch = await importBatch();
@@ -220,6 +273,18 @@ test('orphan and negative-count failures cannot leave a partial batch', async ()
   });
 });
 
+
+async function discardLocalBatch(batch) {
+  // The in-memory test database contains no physical Storage files.
+  await db.exec('begin');
+  try {
+    await db.query("select set_config('request.jwt.claim.sub',$1,true)",[users.alice]);
+    await one('select public.begin_original_cleanup($1)',[batch.id]);
+    await one('select public.finish_original_cleanup($1)',[batch.id]);
+    await db.query('delete from public.import_batches where id=$1',[batch.id]);
+    await db.exec('commit');
+  } catch(error) { await db.exec('rollback'); throw error; }
+}
 test('batch identity changes and missing private originals stop the commit', async () => {
   await asUser(users.alice, async () => {
     const batch = await importBatch();
@@ -230,7 +295,7 @@ test('batch identity changes and missing private originals stop the commit', asy
   const batch = await importBatch();
   await db.query('delete from storage.objects where name=$1', [batch.path]);
   await asUser(users.alice, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] }), 'P0001'); });
-  await db.query('delete from public.import_batches where id=$1', [batch.id]);
+  await discardLocalBatch(batch);
 });
 
 test('private originals stay project-scoped and immutable; viewers can read but cannot upload or commit', async () => {
@@ -247,7 +312,7 @@ test('private originals stay project-scoped and immutable; viewers can read but 
   });
   await asUser(users.viewer, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [newPost()], Metrics: [], Comments: [] }), '42501'); });
   await asUser(null, async () => { await expectError(commitSql, commitArgs(batch, { Posts: [], Metrics: [], Comments: [] }), '42501'); }, 'anon');
-  await db.query('delete from storage.objects where name=$1', [batch.path]); await db.query('delete from public.import_batches where id=$1', [batch.id]);
+  await db.query('delete from storage.objects where name=$1', [batch.path]); await discardLocalBatch(batch);
 });
 
 test('migration creates thirteen business tables and enables RLS on every table', async () => {

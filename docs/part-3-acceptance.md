@@ -62,3 +62,7 @@
 平台指标定义仍需核实，`pending_review` 不表示可直接进行跨平台合并统计。内容表现分析和 AI 洞察属于后续部分。
 
 参考：[Supabase 私有 Bucket](https://supabase.com/docs/guides/storage/buckets/fundamentals)、[Edge 依赖管理](https://supabase.com/docs/guides/functions/dependencies)、[SheetJS Deno 官方发行模块](https://docs.sheetjs.com/docs/getting-started/installation/deno/)。
+
+## V0.6 更新
+
+原文件保留和手动清理已补上，详见 [第五部分](part-5-acceptance.md)。早期验收中的清理待办以第五部分的实现和验证边界为准，真实账号端到端验收仍未完成。

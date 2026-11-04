@@ -134,3 +134,11 @@ test('a previously validated or successful identical batch does not upload origi
   state.batch.status = 'success'; assert.equal((await run()).complete, true);
   assert.equal(state.requests.filter(r => r.path.includes('/storage/v1/object/')).length, 0);
 });
+
+
+test('cleanup in progress refuses import before any original is downloaded or revalidated', async () => {
+  const { state, client } = await fixture(); state.batch.originals_state = 'deleting';
+  await assert.rejects(processImport(client, batchId, 'commit', actorId), /清理/);
+  assert.equal(state.requests.filter(r => r.path.includes('/storage/v1/object/')).length, 0);
+  assert.equal(state.commits.length,0);
+});

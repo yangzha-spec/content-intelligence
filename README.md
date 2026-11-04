@@ -20,6 +20,10 @@
 | **复盘报告：来源、方法和导出** | **复杂导入：3,840 条记录的质量校验** |
 | [![复盘报告与导出](docs/screenshots/report.jpg)](docs/screenshots/report.jpg) | [![复杂数据导入质量报告](docs/screenshots/import-quality.jpg)](docs/screenshots/import-quality.jpg) |
 
+新增原文件管理，可在不登录的演示中展开清理影响；演示不执行删除。
+
+[![原文件保留与清理影响演示](docs/screenshots/original-lifecycle.jpg)](docs/screenshots/original-lifecycle.jpg)
+
 同一份演示源数据按筛选生成结果，例如单独选择 YouTube 后为 120 篇内容、800 条评论；全部平台评论还会按评论日期筛选，所以并非每张图都显示完整的 2,400 条。
 
 ## 已实现功能
@@ -91,12 +95,12 @@ npm run build
 npm run check:connection
 ```
 
-目前 **94 项自动测试通过**。PGlite 执行真实迁移 SQL 验证权限、精度、事务和回滚；服务测试使用真实 Supabase JS 客户端配合模拟 HTTP。
-云端 `03`、`04`、`05` 检查脚本使用事务内合成用户验证 RLS、导入、分析保存、私有报告与重复提交，所有测试数据均回滚。
+目前 **102 项自动测试通过**。PGlite 执行真实迁移 SQL 验证权限、精度、事务和回滚；服务测试使用真实 Supabase JS 客户端配合模拟 HTTP。
+云端 `03`、`04`、`05`、`06` 检查脚本使用事务内合成用户验证 RLS、导入、分析保存、私有报告与重复提交，所有测试数据均回滚。
 浏览器已验证复杂样本 3,840 条记录、跨平台汇总限制、评论搜索、HTML 报告实际下载和窄屏布局。
 
 这些验证不等于真实账号端到端验收。邮箱确认、实际 Storage 上传下载、真实分析历史保存和付费模型调用仍留到最终接入阶段。
-原文件（含失败批次）会保留；脱敏、保留期限、管理员清理、项目删除时清理原文件，以及方面级情感和受评估的 NLP 模型仍未实现。当前页面不提供删除入口。
+原文件默认持续保留，由空间所有者在导入历史中逐批查看影响、输入确认文字后手动清理；支持中断重试，保留来源记录。清理前禁止删除项目/工作空间，防止文件失去归属。没有定时清理，也没有删除项目/空间的页面入口。原文件清理不会删除已入库数据、分析输入快照或本地导出文件；完整个人数据删除、脱敏、方面级情感和受评估的 NLP 模型仍未实现。真实 Storage 清理与并发上传的 HTTP 验收留到最终登录阶段。
 单个项目分析上限为 10,000 篇内容、50,000 次快照、10,000 条评论，源数据 JSON 不超过 12 MB；超限明确拒绝，不静默截断。
 
 ## 文档
@@ -105,7 +109,7 @@ npm run check:connection
 - [数据库设计](docs/database-design.md) · [Supabase 接入](docs/supabase-setup.md)
 - [开发阶段与验收](docs/implementation-plan.md)
 - [登录与项目管理](docs/part-1-acceptance.md) · [导入预览](docs/part-2-acceptance.md) · [确认入库](docs/part-3-acceptance.md)
-- [分析、评论、建议与报告](docs/part-4-acceptance.md)
+- [分析、评论、建议与报告](docs/part-4-acceptance.md) · [原文件保留与清理](docs/part-5-acceptance.md)
 - [截图与合成数据说明](docs/screenshots/README.md) · [变更记录](CHANGELOG.md)
 
 ## 产品呈现参考
